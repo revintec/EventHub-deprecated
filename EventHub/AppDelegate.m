@@ -11,21 +11,34 @@
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
 @property CFMachPortRef eventTap;
+@property CGEventRef kd,ku;
 @end
 
 @implementation AppDelegate
 
 bool optFilterCapslock;
 
+bool smallHalt;CGEventFlags cachedEvFlags;
+-(void)unhalt{smallHalt=false;}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
-
-    
     
     if(optFilterCapslock){
         if(type==kCGEventKeyDown||type==kCGEventKeyUp){
             CGEventFlags f=CGEventGetFlags(event);
             f&=~kCGEventFlagMaskAlphaShift;
             CGEventSetFlags(event,f);
+        }else if(type==kCGEventFlagsChanged){
+            if(!smallHalt){
+                CGEventFlags newFlags=CGEventGetFlags(event);
+                CGEventFlags diff=cachedEvFlags^newFlags;
+                cachedEvFlags=newFlags;
+                if(diff&kCGEventFlagMaskAlphaShift&&!(newFlags&kCGEventFlagMaskAlphaShift)){
+                    smallHalt=true;
+                    CGEventPost(kCGSessionEventTap,self.kd);
+                    CGEventPost(kCGSessionEventTap,self.ku);
+                    [self performSelector:@selector(unhalt)withObject:self afterDelay:0.3];
+                }
+            }
         }
     }
     
@@ -47,7 +60,18 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     if(!AXIsProcessTrusted()){
         [self.window close];
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
+        return;
     }
+    CGEventRef kd=CGEventCreateKeyboardEvent(nil,kVK_CapsLock,true);
+    CGEventRef ku=CGEventCreateKeyboardEvent(nil,kVK_CapsLock,false);
+    if(!kd||!ku){
+        if(kd)CFRelease(kd);
+        if(ku)CFRelease(ku);
+        [self.window close];
+        [self fatalWithText:@"Can't initialize CGEvent"];
+        return;
+    }
+    self.kd=kd;self.ku=ku;
 }
 -(void)applicationWillTerminate:(NSNotification*)aNotification{
     if(self.eventTap){
@@ -57,7 +81,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 }
 -(void)applicationDidResignActive:(NSNotification*)notification{
     CGEventMask interest=0;
-    if(optFilterCapslock)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
+    if(optFilterCapslock)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp)|CGEventMaskBit(kCGEventFlagsChanged);
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)(self));
@@ -65,7 +89,6 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             CFRunLoopSourceRef rp=CFMachPortCreateRunLoopSource(kCFAllocatorDefault,self.eventTap,0);
             CFRunLoopAddSource(CFRunLoopGetMain(),rp,kCFRunLoopDefaultMode);
         }else[self fatalWithText:@"Can't create CGEventTap"];
-        
         
         // if not selecting any insterests, keep the window
         ProcessSerialNumber psn={0,kCurrentProcess};

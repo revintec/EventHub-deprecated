@@ -6,6 +6,7 @@
 //  Copyright (c) 2014 revin. All rights reserved.
 //
 
+#import<Carbon/Carbon.h>
 #import<Cocoa/Cocoa.h>
 
 @interface AppDelegate:NSObject<NSApplicationDelegate>
