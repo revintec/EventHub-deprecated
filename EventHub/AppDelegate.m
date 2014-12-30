@@ -7,6 +7,7 @@
 //
 
 #import "AppDelegate.h"
+#import <AudioToolbox/AudioToolbox.h>
 
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
@@ -16,6 +17,7 @@
 @implementation AppDelegate
 
 bool optFilterCapslock;
+bool optFilterDelete;
 
 bool smallHalt;CGEventFlags cachedEvFlags;
 -(void)unhalt{smallHalt=false;}
@@ -37,6 +39,45 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                     CGEventPost(kCGSessionEventTap,self.kd);
                     CGEventPost(kCGSessionEventTap,self.ku);
                     [self performSelector:@selector(unhalt)withObject:self afterDelay:0.3];
+                }
+            }
+        }
+    }
+    
+    if(optFilterDelete){
+        // should be event keyChar
+        if(type==kCGEventKeyDown||type==kCGEventKeyUp){
+            CGEventFlags f=CGEventGetFlags(event)&NSDeviceIndependentModifierFlagsMask;
+            f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
+            if(f==kCGEventFlagMaskShift){
+                int64_t keycode=CGEventGetIntegerValueField(event,kCGKeyboardEventKeycode);
+                if(keycode==kVK_Delete||keycode==kVK_ForwardDelete){
+                    do{
+                        CFTypeRef elem=AXUIElementCreateSystemWide();
+                        if(AXUIElementCopyAttributeValue(elem,kAXFocusedUIElementAttribute,&elem))break;
+                        CFTypeRef role;if(AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role))break;
+                        if(!CFEqual(kAXTextFieldRole,role)/*&&!CFEqual(kAXTextAreaRole,role)*/)break;
+                        do{
+                            // !!! for AXTextField(capable of multiple selection)
+                            // !!! beware of some selection is on the same line
+                            // !!! aaa [bbb] cc[c] like this, when delete
+                            CFTypeRef axrange;if(AXUIElementCopyAttributeValue(elem,kAXSelectedTextRangeAttribute,&axrange))break;
+                            CFTypeRef text;if(AXUIElementCopyAttributeValue(elem,kAXValueAttribute,&text))break;
+                            CFRange range;if(!AXValueGetValue(axrange,kAXValueCFRangeType,&range))break;
+                            if(keycode==kVK_ForwardDelete){
+                                CFTypeRef len;if(AXUIElementCopyAttributeValue(elem,kAXNumberOfCharactersAttribute,&len))break;
+                                range.length=[(__bridge NSNumber*)len longValue]-range.location;
+                            }else if(keycode==kVK_Delete){
+                                range.length+=range.location;
+                                range.location=0;
+                            }else break;
+                            axrange=AXValueCreate(kAXValueCFRangeType,&range);
+                            if(AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))break;
+                            if(AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,@""))break;
+                            return nil;
+                        }while(false);
+                        AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+                    }while(false);
                 }
             }
         }
@@ -82,6 +123,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 -(void)applicationDidResignActive:(NSNotification*)notification{
     CGEventMask interest=0;
     if(optFilterCapslock)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp)|CGEventMaskBit(kCGEventFlagsChanged);
+    if(optFilterDelete)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)(self));
@@ -105,5 +147,6 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     }
     // TODO add settings panel instead of hard-code options
     optFilterCapslock=true;
+    optFilterDelete=true;
 }
 @end
