@@ -16,7 +16,7 @@
 @end
 @implementation AppDelegate
 
-bool doptDisableAllFiltering;
+bool doptDisableAllFiltering=true;
 
 bool optFilterWordByWord;
 bool optFilterCapslock;
@@ -100,8 +100,10 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             if(smallHalt)break;
             CGEventFlags newFlags=CGEventGetFlags(event);
             CGEventFlags diff=cachedEvFlags^newFlags;
-            if(((diff&kCGEventFlagMaskShift)&&(newFlags&kCGEventFlagMaskShift))||
-               (diff&kCGEventFlagMaskAlphaShift&&!(newFlags&kCGEventFlagMaskAlphaShift))){
+            // do not interfere with Shift!
+            // it may interrupt typing:
+            // aaa[SHIFT_DN]BBB[SHIFT_UP]ccc
+            if((diff&kCGEventFlagMaskAlphaShift)&&!(newFlags&kCGEventFlagMaskAlphaShift)){
                 NSLog(@"remit Capslock event");
                 [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(unhalt)object:self];
                 smallHalt=true;
@@ -161,7 +163,10 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     NSDictionary*_n=[notification userInfo];if(!_n)return;
     NSRunningApplication*ra=[_n objectForKey:NSWorkspaceApplicationKey];if(!ra)return;
     NSString*name=[ra localizedName];
+    bool cache=doptDisableAllFiltering;
     doptDisableAllFiltering=self.options[name];
+    if(cache&&!doptDisableAllFiltering)
+        cachedEvFlags=[NSEvent modifierFlags];
 //    NSLog(@"%@ %d",name,doptDisableAllFiltering);
 }
 -(void)fatalWithText:(NSString*)msg{
@@ -211,6 +216,10 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 -(void)applicationWillBecomeActive:(NSNotification*)notification{
     ProcessSerialNumber psn={0,kCurrentProcess};
     TransformProcessType(&psn,kProcessTransformToForegroundApplication);
+    // don't move this line, it's also used in
+    // -(void)someotherAppGotActivated:(NSNotification*)notification
+    // to update cachedEvFlags
+    doptDisableAllFiltering=true;
     if(self.eventTap){
         CFRelease(self.eventTap);
         self.eventTap=nil;
