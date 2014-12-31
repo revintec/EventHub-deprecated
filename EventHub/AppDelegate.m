@@ -12,7 +12,6 @@
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
 @property CFMachPortRef eventTap;
-@property CGEventRef kd,ku;
 @end
 @implementation AppDelegate
 
@@ -32,18 +31,27 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             if(!smallHalt){
                 CGEventFlags newFlags=CGEventGetFlags(event);
                 CGEventFlags diff=cachedEvFlags^newFlags;
-                cachedEvFlags=newFlags;
-                if(diff&kCGEventFlagMaskAlphaShift&&!(newFlags&kCGEventFlagMaskAlphaShift)){
+                if(diff&kCGEventFlagMaskShift||(diff&kCGEventFlagMaskAlphaShift&&!(newFlags&kCGEventFlagMaskAlphaShift))){
+                    NSLog(@"remit Capslock event");
                     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(unhalt)object:self];
                     smallHalt=true;
-                    CGEventPost(kCGSessionEventTap,self.kd);
-                    CGEventPost(kCGSessionEventTap,self.ku);
-                    [self performSelector:@selector(unhalt)withObject:self afterDelay:0.3];
-                }
+                    // since we are a active listener
+                    // CGEventPost will get queued instead of send immediately
+                    // so we do CGEventPost first instead of last
+                    CGEventPost(kCGSessionEventTap,event); // this is sq 2
+                    CGEventSetFlags(event,newFlags^kCGEventFlagMaskAlphaShift);// this is sq 1
+                    [self performSelector:@selector(unhalt)withObject:self];
+                }cachedEvFlags=newFlags;
             }
         }
     }
     
+    // I'll live with CMD-BKSP/DELE(delete to line start/end) for now
+    // use SHIFT-BKSP/DELE to replace it is impractical
+    // (have to consider more compatibility and implement more logic)
+    // may be later implement the following feature:
+    // CMD-DELE               delete to line end
+    // ALT-SHIFT-BKSP/DELE    delete whole word under cursor
 //    if(optFilterDelete){
 //        // should be event keyChar
 //        if(type==kCGEventKeyDown||type==kCGEventKeyUp){
@@ -104,16 +112,6 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
         return;
     }
-    CGEventRef kd=CGEventCreateKeyboardEvent(nil,kVK_CapsLock,true);
-    CGEventRef ku=CGEventCreateKeyboardEvent(nil,kVK_CapsLock,false);
-    if(!kd||!ku){
-        if(kd)CFRelease(kd);
-        if(ku)CFRelease(ku);
-        [self.window close];
-        [self fatalWithText:@"Can't initialize CGEvent"];
-        return;
-    }
-    self.kd=kd;self.ku=ku;
 }
 -(void)applicationWillTerminate:(NSNotification*)aNotification{
     if(self.eventTap){
