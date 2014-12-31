@@ -12,8 +12,11 @@
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
 @property CFMachPortRef eventTap;
+@property NSMutableDictionary*options;
 @end
 @implementation AppDelegate
+
+bool doptDisableAllFiltering;
 
 bool optFilterWordByWord;
 bool optFilterCapslock;
@@ -70,6 +73,7 @@ NSString*cachedText;
     error:cachedText=nil;AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
 }
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
+    if(doptDisableAllFiltering)return event;
     
     if(optFilterWordByWord)do{
         if(type!=kCGEventKeyDown)break;
@@ -153,7 +157,13 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 
     return event;
 }
-
+-(void)someotherAppGotActivated:(NSNotification*)notification{
+    NSDictionary*_n=[notification userInfo];if(!_n)return;
+    NSRunningApplication*ra=[_n objectForKey:NSWorkspaceApplicationKey];if(!ra)return;
+    NSString*name=[ra localizedName];
+    doptDisableAllFiltering=self.options[name];
+//    NSLog(@"%@ %d",name,doptDisableAllFiltering);
+}
 -(void)fatalWithText:(NSString*)msg{
     NSRunningApplication*ra=[NSRunningApplication currentApplication];
     NSAlert*alert=[NSAlert new];
@@ -171,6 +181,8 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
         return;
     }
+    NSNotificationCenter*ncc=[[NSWorkspace sharedWorkspace]notificationCenter];
+    [ncc addObserver:self selector:@selector(someotherAppGotActivated:)name:NSWorkspaceDidActivateApplicationNotification object:nil];
 }
 -(void)applicationWillTerminate:(NSNotification*)aNotification{
     if(self.eventTap){
@@ -204,6 +216,11 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         self.eventTap=nil;
     }
     // TODO add settings panel instead of hard-code options
+    self.options=[NSMutableDictionary new];
+    id opt=(__bridge id)kCFBooleanTrue;
+    self.options[@"Remote Desktop Connection"]=opt;
+    self.options[@"VMware Fusion"]=opt;
+
     optFilterWordByWord=true;
     optFilterCapslock=true;
 //    optFilterDelete=true;
