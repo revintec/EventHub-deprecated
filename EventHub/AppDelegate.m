@@ -31,6 +31,8 @@ static inline CGEventFlags ugcFlags(CGEventRef event){
     return f;
 }
 NSString*cachedText;
+// a faster way is only to compare text around cursor position
+// instead of retrive and compare almost every text!
 -(void)delayedOperationOnAXT:(AXUIElementRef)elem{
     do{
         if(!cachedText)break;
@@ -38,6 +40,7 @@ NSString*cachedText;
         NSString*text=(__bridge NSString*)axtext;
         NSUInteger l=0,r=0,lc=[cachedText length],lt=[text length],len=MIN(lc,lt);
         for(l=0;l<len;++l)if([cachedText characterAtIndex:l]!=[text characterAtIndex:l])break;
+        if(l>=len)break;// '[' or ']' is pressed but nothing changed? that's an error!
         for(r=1;r<len-l;++r)if([cachedText characterAtIndex:lc-r]!=[text characterAtIndex:lt-r])break;
         if((r=lt-r)<=l)break;
         do{
@@ -81,6 +84,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         if(keycode!=kVK_ANSI_LeftBracket&&keycode!=kVK_ANSI_RightBracket)break;
         CGEventFlags f=ugcFlags(event);
         if(f)break; // if any modifier is down
+        NSTimeInterval timestamp=CACurrentMediaTime();
         CFTypeRef elem=AXUIElementCreateSystemWide();
         if(AXUIElementCopyAttributeValue(elem,kAXFocusedUIElementAttribute,&elem))break;
         CFTypeRef role;if(AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role))break;
@@ -89,6 +93,12 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         if(cachedText){AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
         cachedText=CFBridgingRelease(text);
         [self performSelector:@selector(delayedOperationOnAXT:)withObject:CFBridgingRelease(elem)afterDelay:0.1];
+        timestamp=CACurrentMediaTime()-timestamp;
+        if(timestamp>0.3){
+            NSLog(@"optFilterWordByWord using too much time: %lu chars, %d ms",
+                  (unsigned long)[cachedText length],(int)(timestamp*1000));
+            AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+        }
     }while(false);
     
     if(optFilterCapslock){
