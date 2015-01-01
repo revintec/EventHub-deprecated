@@ -30,75 +30,63 @@ static inline CGEventFlags ugcFlags(CGEventRef event){
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
-NSString*cachedText;
-// a faster way is only to compare text around cursor position
-// instead of retrive and compare almost every text!
--(void)delayedOperationOnAXT:(AXUIElementRef)elem{
+#define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
+// dopt used for PendingTextInputOperations
+AXUIElementRef doptPTIOe;NSUInteger doptPTIOl,doptPTIOr;
+CFTypeRef kAXTextInputMarkedRangeAttribute=@"AXTextInputMarkedRange";
+-(void)delayedOperationOnAXT{
     do{
-        if(!cachedText)break;
-        CFTypeRef axtext;if(AXUIElementCopyAttributeValue(elem,kAXValueAttribute,&axtext))break;
+        cc("orphant delayedOperationOnAXT",!doptPTIOe);
+        CFTypeRef axrange;NSRange range;
+        cc("get AXTIMRA",AXUIElementCopyAttributeValue(doptPTIOe,kAXTextInputMarkedRangeAttribute,&axrange));
+        cc("error translating AXValue",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
+        cc("TextIMR not clean",(int)range.length|(int)(range.length>>32));
+        cc("get AXSTRA",AXUIElementCopyAttributeValue(doptPTIOe,kAXSelectedTextRangeAttribute,&axrange));
+        cc("error translating AXValue",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
+        cc("TextSRA not clean",(int)range.length|(int)(range.length>>32));
+        CFTypeRef axtext;cc("unable to get AXVA",AXUIElementCopyAttributeValue(doptPTIOe,kAXValueAttribute,&axtext));
         NSString*text=(__bridge NSString*)axtext;
-        NSUInteger l=0,r=0,lc=[cachedText length],lt=[text length],len=MIN(lc,lt);
-        for(l=0;l<len;++l)if([cachedText characterAtIndex:l]!=[text characterAtIndex:l])break;
-        if(l>=len)break;// '[' or ']' is pressed but nothing changed? that's an error!
-        for(r=1;r<len-l;++r)if([cachedText characterAtIndex:lc-r]!=[text characterAtIndex:lt-r])break;
-        if((r=lt-r)<=l)break;
-        do{
-            if(++r-l<3)break;
-            NSRange range=NSMakeRange(l,r-l);
-            NSString*input=[text substringWithRange:range];
-            if((len=--r-l)>4)goto error;
-            switch([input characterAtIndex:[input length]-1]){
-                case '[':
-                    if(len>2)
-                        r=l+2;
-                    else r=l+1;
-                    break;
-                case ']':
-                    if(len>2)
-                        l=r-2;
-                    else l=r-1;
-                    break;
-                default:goto error;
-            }NSString*output=[text substringWithRange:NSMakeRange(l,r-l)];
-            do{
-                CFTypeRef axrange=AXValueCreate(kAXValueCFRangeType,&range);
-                if(AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))break;
-                if(AXUIElementCopyAttributeValue(elem,kAXSelectedTextAttribute,&axtext))break;
-                if(!CFEqual((__bridge CFTypeRef)input,axtext))break;
-                if(AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,(__bridge CFTypeRef)output))break;
-                goto ok;
-            }while(false);
-            goto error;
-        }while(false);
-    ok:cachedText=nil;return;
+        NSUInteger len=[text length]-doptPTIOr-1;
+        unichar opcode=[text characterAtIndex:len];
+        len-=doptPTIOl;
+        if(len<2||len>4)break;
+        range=NSMakeRange(doptPTIOl,len+1);
+        axrange=AXValueCreate(kAXValueCFRangeType,&range);
+        if(opcode==']'){
+            doptPTIOl+=len;
+            doptPTIOl-=(len=(len>>1)+(len&1));
+        }else if(opcode=='[')len=(len>>1)+(len&1);
+        else cc("unknown opcode",(opcode!='[')&&(opcode=']')&&opcode);
+        range=NSMakeRange(doptPTIOl,len);
+        text=[text substringWithRange:range];
+        cc("set AXSTRA",AXUIElementSetAttributeValue(doptPTIOe,kAXSelectedTextRangeAttribute,axrange));
+        cc("set AXSTA",AXUIElementSetAttributeValue(doptPTIOe,kAXSelectedTextAttribute,(__bridge CFTypeRef)text));
     }while(false);
-    error:cachedText=nil;AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+    doptPTIOe=nil;
 }
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     if(doptDisableAllFiltering)return event;
     
     if(optFilterWordByWord)do{
         if(type!=kCGEventKeyDown)break;
+        if(doptPTIOe){
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedOperationOnAXT)object:nil];
+            doptPTIOe=nil;cc("colliding delayedOperationOnAXT",1);
+        }
         int64_t keycode=CGEventGetIntegerValueField(event,kCGKeyboardEventKeycode);
         if(keycode!=kVK_ANSI_LeftBracket&&keycode!=kVK_ANSI_RightBracket)break;
         CGEventFlags f=ugcFlags(event);
         if(f)break; // if any modifier is down
-        NSTimeInterval timestamp=CACurrentMediaTime();
         CFTypeRef elem=AXUIElementCreateSystemWide();
-        if(AXUIElementCopyAttributeValue(elem,kAXFocusedUIElementAttribute,&elem))break;
-        CFTypeRef role;if(AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role))break;
+        cc("get AXFUIEA",AXUIElementCopyAttributeValue(elem,kAXFocusedUIElementAttribute,&elem));
+        CFTypeRef role;cc("get AXRA",AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role));
         if(!CFEqual(kAXTextFieldRole,role)&&!CFEqual(kAXTextAreaRole,role))break;
-        CFTypeRef text;if(AXUIElementCopyAttributeValue(elem,kAXValueAttribute,&text))break;
-        if(cachedText){AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
-        cachedText=CFBridgingRelease(text);
-        [self performSelector:@selector(delayedOperationOnAXT:)withObject:CFBridgingRelease(elem)afterDelay:0.1];
-        timestamp=CACurrentMediaTime()-timestamp;
-        if(timestamp>0.3){
-            NSLog(@"optFilterWordByWord using too much time: %lu chars, %d ms",
-                  (unsigned long)[cachedText length],(int)(timestamp*1000));
-            AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
-        }
+        CFTypeRef axrange;cc("get AXTIMRA",AXUIElementCopyAttributeValue(elem,kAXTextInputMarkedRangeAttribute,&axrange));
+        NSRange range;cc("error translating AXValue",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
+        if(!range.length)break;// not using input method
+        CFTypeRef length;cc("get AXNCA",AXUIElementCopyAttributeValue(elem,kAXNumberOfCharactersAttribute,&length));
+        doptPTIOl=range.location;doptPTIOr=[(__bridge NSNumber*)length unsignedIntegerValue]-range.location-range.length;
+        doptPTIOe=elem;[self performSelector:@selector(delayedOperationOnAXT)withObject:nil afterDelay:0.1];
     }while(false);
     
     if(optFilterCapslock){
