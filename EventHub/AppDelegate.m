@@ -17,6 +17,7 @@
 @implementation AppDelegate
 
 bool doptDisableAllFiltering=true;
+bool doptDisableWordByWord;
 
 bool optFilterWordByWord;
 bool optFilterCapslock;
@@ -67,7 +68,7 @@ CFTypeRef kAXTextInputMarkedRangeAttribute=@"AXTextInputMarkedRange";
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     if(doptDisableAllFiltering)return event;
     
-    if(optFilterWordByWord)do{
+    if(!doptDisableWordByWord&&optFilterWordByWord)do{
         if(type!=kCGEventKeyDown)break;
         if(doptPTIOe){
             [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedOperationOnAXT)object:nil];
@@ -92,8 +93,15 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     if(optFilterCapslock){
         if(type==kCGEventKeyDown||type==kCGEventKeyUp){
             CGEventFlags f=CGEventGetFlags(event);
-            f&=~kCGEventFlagMaskAlphaShift;
-            CGEventSetFlags(event,f);
+            if(f&kCGEventFlagMaskAlphaShift){
+                // KNOWN BUG: Chrome <input type="password"/>
+                // won't respect our setting here.
+                // if you input password while CAPSLOCK is on,
+                // you'll enter all alphabet in upper case.
+                // this can't be fixed with CGEventKeyboardSetUnicodeString
+                f&=~kCGEventFlagMaskAlphaShift;
+                CGEventSetFlags(event,f);
+            }
         }else if(type==kCGEventFlagsChanged)do{
             if(smallHalt)break;
             CGEventFlags newFlags=CGEventGetFlags(event);
@@ -161,6 +169,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     NSDictionary*_n=[notification userInfo];if(!_n)return;
     NSRunningApplication*ra=[_n objectForKey:NSWorkspaceApplicationKey];if(!ra)return;
     NSString*name=[ra localizedName];
+    doptDisableWordByWord=[@"IntelliJ IDEA"isEqual:name];
     bool cache=doptDisableAllFiltering;
     doptDisableAllFiltering=self.options[name];
     if(cache&&!doptDisableAllFiltering)
