@@ -16,17 +16,14 @@
 @end
 @implementation AppDelegate
 
-#define DOPT_DEFAULT_MODE          DOPT_ENABLE_WORD_BY_WORD
-#define DOPT_DISABLE_ALL_FILTERING 0x00000000
+#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT
+#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT
 #define DOPT_FILTEROUT_CAPSLOCK    0x00000001
-#define DOPT_ENABLE_WORD_BY_WORD   0x00000002
-#define DOPT_REPLACE_DELETECMB     0
+#define DOPT_AIRPORTEXTRA_ALT      0x00000002
 
+AXUIElementRef axSystem;
 unsigned int gopts,dopts;
-CGEventRef gEventFlagsChanged;
 
-bool smallHalt;CGEventFlags cachedEvFlags;
--(void)unhalt{smallHalt=false;}
 static inline CGEventFlags ugcFlags(CGEventRef event){
     CGEventFlags f=CGEventGetFlags(event);
     f&=NSDeviceIndependentModifierFlagsMask;
@@ -34,63 +31,8 @@ static inline CGEventFlags ugcFlags(CGEventRef event){
     return f;
 }
 #define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
-// dopt used for PendingTextInputOperations
-AXUIElementRef doptPTIOe;NSUInteger doptPTIOl,doptPTIOr;
-CFTypeRef kAXTextInputMarkedRangeAttribute=@"AXTextInputMarkedRange";
--(void)delayedOperationOnAXT{
-    do{
-        cc("orphant delayedOperationOnAXT",!doptPTIOe);
-        CFTypeRef axrange;NSRange range;
-        cc("get AXTIMRA",AXUIElementCopyAttributeValue(doptPTIOe,kAXTextInputMarkedRangeAttribute,&axrange));
-        cc("error translating AXValue",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
-        cc("TextIMR not clean",(int)range.length|(int)(range.length>>32));
-        cc("get AXSTRA",AXUIElementCopyAttributeValue(doptPTIOe,kAXSelectedTextRangeAttribute,&axrange));
-        cc("error translating AXValue",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
-        cc("TextSRA not clean",(int)range.length|(int)(range.length>>32));
-        CFTypeRef axtext;cc("unable to get AXVA",AXUIElementCopyAttributeValue(doptPTIOe,kAXValueAttribute,&axtext));
-        NSString*text=(__bridge NSString*)axtext;
-        NSUInteger len=[text length]-doptPTIOr-1;
-        unichar opcode=[text characterAtIndex:len];
-        len-=doptPTIOl;
-        if(len<2||len>4)break;
-        range=NSMakeRange(doptPTIOl,len+1);
-        axrange=AXValueCreate(kAXValueCFRangeType,&range);
-        if(opcode==']'){
-            doptPTIOl+=len;
-            doptPTIOl-=(len=(len>>1)+(len&1));
-        }else if(opcode=='[')len=(len>>1)+(len&1);
-        else cc("unknown opcode",(opcode!='[')&&(opcode=']')&&opcode);
-        range=NSMakeRange(doptPTIOl,len);
-        text=[text substringWithRange:range];
-        cc("set AXSTRA",AXUIElementSetAttributeValue(doptPTIOe,kAXSelectedTextRangeAttribute,axrange));
-        cc("set AXSTA",AXUIElementSetAttributeValue(doptPTIOe,kAXSelectedTextAttribute,(__bridge CFTypeRef)text));
-    }while(false);
-    doptPTIOe=nil;
-}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
-    
-    if(opts&DOPT_ENABLE_WORD_BY_WORD)do{
-        if(type!=kCGEventKeyDown)break;
-        if(doptPTIOe){
-            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedOperationOnAXT)object:nil];
-            doptPTIOe=nil;cc("colliding delayedOperationOnAXT",1);
-        }
-        int64_t keycode=CGEventGetIntegerValueField(event,kCGKeyboardEventKeycode);
-        if(keycode!=kVK_ANSI_LeftBracket&&keycode!=kVK_ANSI_RightBracket)break;
-        CGEventFlags f=ugcFlags(event);
-        if(f)break; // if any modifier is down
-        CFTypeRef elem=AXUIElementCreateSystemWide();
-        cc("get AXFUIEA",AXUIElementCopyAttributeValue(elem,kAXFocusedUIElementAttribute,&elem));
-        CFTypeRef role;cc("get AXRA",AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role));
-        if(!CFEqual(kAXTextFieldRole,role)&&!CFEqual(kAXTextAreaRole,role))break;
-        CFTypeRef axrange;cc("get AXTIMRA",AXUIElementCopyAttributeValue(elem,kAXTextInputMarkedRangeAttribute,&axrange));
-        NSRange range;cc("error translating AXValue",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
-        if(!range.length)break;// not using input method
-        CFTypeRef length;cc("get AXNCA",AXUIElementCopyAttributeValue(elem,kAXNumberOfCharactersAttribute,&length));
-        doptPTIOl=range.location;doptPTIOr=[(__bridge NSNumber*)length unsignedIntegerValue]-range.location-range.length;
-        doptPTIOe=elem;[self performSelector:@selector(delayedOperationOnAXT)withObject:nil afterDelay:0.1];
-    }while(false);
     
     if(opts&DOPT_FILTEROUT_CAPSLOCK){
         if(type==kCGEventKeyDown||type==kCGEventKeyUp){
@@ -104,67 +46,37 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                 f&=~kCGEventFlagMaskAlphaShift;
                 CGEventSetFlags(event,f);
             }
-        }else if(type==kCGEventFlagsChanged)do{
-            if(smallHalt)break;
-            CGEventFlags newFlags=CGEventGetFlags(event);
-            CGEventFlags diff=cachedEvFlags^newFlags;
-            // do not interfere with Shift!
-            // it may interrupt typing:
-            // aaa[SHIFT_DN]BBB[SHIFT_UP]ccc
-            if((diff&kCGEventFlagMaskAlphaShift)&&!(newFlags&kCGEventFlagMaskAlphaShift)){
-                NSLog(@"remit Capslock event");
-                [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(unhalt)object:self];
-                smallHalt=true;
-                // since we are a active listener
-                // CGEventPost will get queued instead of send immediately
-                // so we do CGEventPost first instead of last
-                CGEventPost(kCGSessionEventTap,event); // this is sq 2
-                CGEventSetFlags(event,newFlags^kCGEventFlagMaskAlphaShift);// this is sq 1
-                [self performSelector:@selector(unhalt)withObject:self];
-            }cachedEvFlags=newFlags;
-        }while(false);
+        }
     }
     
-    // I'll live with CMD-BKSP/DELE(delete to line start/end) for now
-    // use SHIFT-BKSP/DELE to replace it is impractical
-    // (have to consider more compatibility and implement more logic)
-    // may be later implement the following feature:
-    // CMD-DELE               delete to line end
-    // ALT-SHIFT-BKSP/DELE    delete whole word under cursor
-//    if(optFilterDelete)do{
-//        // should be event keyChar
-//        if(type!=kCGEventKeyDown&&type!=kCGEventKeyUp)break;
-////        int64_t isRepeat=CGEventGetIntegerValueField(event,kCGKeyboardEventAutorepeat);
-//        int64_t keycode=CGEventGetIntegerValueField(event,kCGKeyboardEventKeycode);
-//        if(keycode!=kVK_Delete&&keycode!=kVK_ForwardDelete)break;
-//        CGEventFlags f=ugcFlags(event);
-//        if(f!=kCGEventFlagMaskShift)break;
-//        CFTypeRef elem=AXUIElementCreateSystemWide();
-//        if(AXUIElementCopyAttributeValue(elem,kAXFocusedUIElementAttribute,&elem))break;
-//        CFTypeRef role;if(AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role))break;
-//        if(!CFEqual(kAXTextFieldRole,role)/*&&!CFEqual(kAXTextAreaRole,role)*/)break;
-//        do{
-//            // !!! for AXTextField(capable of multiple selection)
-//            // !!! beware of some selection is on the same line
-//            // !!! aaa [bbb] cc[c] like this, when delete
-//            CFTypeRef axrange;if(AXUIElementCopyAttributeValue(elem,kAXSelectedTextRangeAttribute,&axrange))break;
-//            CFTypeRef text;if(AXUIElementCopyAttributeValue(elem,kAXValueAttribute,&text))break;
-//            CFRange range;if(!AXValueGetValue(axrange,kAXValueCFRangeType,&range))break;
-//            if(keycode==kVK_ForwardDelete){
-//                CFTypeRef len;if(AXUIElementCopyAttributeValue(elem,kAXNumberOfCharactersAttribute,&len))break;
-//                range.length=[(__bridge NSNumber*)len longValue]-range.location;
-//            }else if(keycode==kVK_Delete){
-//                range.length+=range.location;
-//                range.location=0;
-//            }else break;
-//            axrange=AXValueCreate(kAXValueCFRangeType,&range);
-//            if(AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))break;
-//            if(AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,@""))break;
-//            return nil;
-//        }while(false);
-//        AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
-//    }while(false);
-
+    if(opts&DOPT_AIRPORTEXTRA_ALT)do{
+        if(type==kCGEventLeftMouseDown){
+            CGPoint point=CGEventGetLocation(event);
+            // not in the upper-right corner, so can't hit AirPortExtra
+            if(point.y>=22||point.x<=1000)break;
+            AXUIElementRef elem;
+            extern AXError _AXUIElementCopyElementAtPositionIncludeIgnored(AXUIElementRef root,float x,float y,AXUIElementRef*elem,long includingIgnored,long rcx,long r8,long r9);
+            cc("AXUIElementCopyElementAtPositionEx",_AXUIElementCopyElementAtPositionIncludeIgnored
+               (axSystem,point.x,point.y,&elem,false,0,0,0));
+            CFTypeRef v;cc("AXUIECAV-ROLE",AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&v));
+            if(!CFEqual(kAXMenuBarItemRole,v))break;
+            AXError error=AXUIElementCopyAttributeValue(elem,(CFTypeRef)@"AXClassName",&v);
+            if(error){
+                if(kAXErrorAttributeUnsupported!=error)cc("AXUIECAV-AXCN",error);
+                cc("AXUIECAV-DESC",AXUIElementCopyAttributeValue(elem,kAXDescriptionAttribute,&v));
+                if(![(__bridge NSString*)v hasPrefix:@"Wi-Fi, "])break;
+                CGEventFlags f=CGEventGetFlags(event);
+                if(!(f&kCGEventFlagMaskAlternate)){
+                    f|=kCGEventFlagMaskAlternate;
+                    CGEventSetFlags(event,f);
+                }
+            }else{
+                cc("I'm feeling lucky!",1);
+                NSLog(@"%@",v);
+            }
+        }
+    }while(false);
+    
     return event;
 }
 -(void)someotherAppGotActivated:(NSNotification*)notification{
@@ -172,17 +84,8 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     NSRunningApplication*ra=[_n objectForKey:NSWorkspaceApplicationKey];if(!ra)return;
     NSString*name=[ra localizedName];
     NSNumber*opt=self.options[name];
-    unsigned int lastdopts=dopts;
     if(opt)dopts=[opt unsignedIntValue];
     else dopts=DOPT_DEFAULT_MODE;
-    // refresh modifierFlags state
-    if(gopts&dopts&DOPT_FILTEROUT_CAPSLOCK)
-        cachedEvFlags=[NSEvent modifierFlags];
-    else if(lastdopts&DOPT_FILTEROUT_CAPSLOCK){
-        // refresh system status
-        CGEventSetFlags(gEventFlagsChanged,[NSEvent modifierFlags]);
-        CGEventPost(kCGSessionEventTap,gEventFlagsChanged);
-    }
     NSLog(@"dopt %@: %08x",name,dopts);
 }
 -(void)fatalWithText:(NSString*)msg{
@@ -202,27 +105,25 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
         return;
     }
-    gEventFlagsChanged=CGEventCreate(nil);
-    if(!gEventFlagsChanged){
-        [self.window close];
-        [self fatalWithText:@"Can't initialize gtmpEvent"];
-        return;
-    }
-    CGEventSetType(gEventFlagsChanged,kCGEventFlagsChanged);
+    axSystem=AXUIElementCreateSystemWide();
     NSNotificationCenter*ncc=[[NSWorkspace sharedWorkspace]notificationCenter];
     [ncc addObserver:self selector:@selector(someotherAppGotActivated:)name:NSWorkspaceDidActivateApplicationNotification object:nil];
 }
--(void)applicationWillTerminate:(NSNotification*)aNotification{
+-(void)undoAllChanges{
+    dopts=0;
     if(self.eventTap){
         CFRelease(self.eventTap);
         self.eventTap=nil;
     }
 }
+-(void)applicationWillTerminate:(NSNotification*)aNotification{
+    [self undoAllChanges];
+}
 -(void)applicationDidResignActive:(NSNotification*)notification{
     CGEventMask interest=0;
-    if(gopts&DOPT_ENABLE_WORD_BY_WORD)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
-    if(gopts&DOPT_FILTEROUT_CAPSLOCK) interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp)|CGEventMaskBit(kCGEventFlagsChanged);
-//    if(optFilterDelete)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
+    if(gopts&DOPT_FILTEROUT_CAPSLOCK)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
+    if(gopts&DOPT_AIRPORTEXTRA_ALT)  interest|=CGEventMaskBit(kCGEventLeftMouseDown);
+    
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
         if(self.eventTap){
@@ -238,17 +139,10 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 -(void)applicationWillBecomeActive:(NSNotification*)notification{
     ProcessSerialNumber psn={0,kCurrentProcess};
     TransformProcessType(&psn,kProcessTransformToForegroundApplication);
-    // don't move this line, it's also used in
-    // -(void)someotherAppGotActivated:(NSNotification*)notification
-    // to update cachedEvFlags
-    dopts=0; // temporary disable all functions when we're foreground
-    if(self.eventTap){
-        CFRelease(self.eventTap);
-        self.eventTap=nil;
-    }
+    [self undoAllChanges]; // temporary disable all functions when we're foreground
     // TODO add settings panel instead of hard-code options
     self.options=[NSMutableDictionary new];
-#define setopt(app,opt) self.options[@app]=[NSNumber numberWithUnsignedInt:opt]
+#define setopt(app,opt) self.options[@app]=[NSNumber numberWithUnsignedInt:DOPT_DISABLE_ALL_FILTERING|opt]
     setopt("Remote Desktop Connection",DOPT_DISABLE_ALL_FILTERING);
     setopt("VMware Fusion",            DOPT_DISABLE_ALL_FILTERING);
     setopt("IntelliJ IDEA",            DOPT_FILTEROUT_CAPSLOCK);
