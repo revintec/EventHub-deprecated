@@ -23,6 +23,7 @@
 #define DOPT_REPLACE_DELETECMB     0
 
 unsigned int gopts,dopts;
+CGEventRef gEventFlagsChanged;
 
 bool smallHalt;CGEventFlags cachedEvFlags;
 -(void)unhalt{smallHalt=false;}
@@ -171,11 +172,17 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     NSRunningApplication*ra=[_n objectForKey:NSWorkspaceApplicationKey];if(!ra)return;
     NSString*name=[ra localizedName];
     NSNumber*opt=self.options[name];
+    unsigned int lastdopts=dopts;
     if(opt)dopts=[opt unsignedIntValue];
     else dopts=DOPT_DEFAULT_MODE;
     // refresh modifierFlags state
     if(gopts&dopts&DOPT_FILTEROUT_CAPSLOCK)
         cachedEvFlags=[NSEvent modifierFlags];
+    else if(lastdopts&DOPT_FILTEROUT_CAPSLOCK){
+        // refresh system status
+        CGEventSetFlags(gEventFlagsChanged,[NSEvent modifierFlags]);
+        CGEventPost(kCGSessionEventTap,gEventFlagsChanged);
+    }
     NSLog(@"dopt %@: %x",name,dopts);
 }
 -(void)fatalWithText:(NSString*)msg{
@@ -195,6 +202,13 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
         return;
     }
+    gEventFlagsChanged=CGEventCreate(nil);
+    if(!gEventFlagsChanged){
+        [self.window close];
+        [self fatalWithText:@"Can't initialize gtmpEvent"];
+        return;
+    }
+    CGEventSetType(gEventFlagsChanged,kCGEventFlagsChanged);
     NSNotificationCenter*ncc=[[NSWorkspace sharedWorkspace]notificationCenter];
     [ncc addObserver:self selector:@selector(someotherAppGotActivated:)name:NSWorkspaceDidActivateApplicationNotification object:nil];
 }
