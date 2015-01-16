@@ -183,7 +183,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         CGEventSetFlags(gEventFlagsChanged,[NSEvent modifierFlags]);
         CGEventPost(kCGSessionEventTap,gEventFlagsChanged);
     }
-    NSLog(@"dopt %@: %x",name,dopts);
+    NSLog(@"dopt %@: %08x",name,dopts);
 }
 -(void)fatalWithText:(NSString*)msg{
     NSRunningApplication*ra=[NSRunningApplication currentApplication];
