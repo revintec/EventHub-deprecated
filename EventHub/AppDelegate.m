@@ -53,26 +53,24 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         if(type==kCGEventLeftMouseDown){
             CGPoint point=CGEventGetLocation(event);
             // not in the upper-right corner, so can't hit AirPortExtra
-            if(point.y>=22||point.x<=1000)break;
+            // DynamicLyrics.app's, Bartender.app's MenuBarExtra donesn't
+            // have kAXDescriptionAttribute, and will cause our app to bailout
+            // so we constrain point.x to 1200~1300
+            if(point.y>=22||point.x<=1200||point.x>=1300)break;
             AXUIElementRef elem;
             extern AXError _AXUIElementCopyElementAtPositionIncludeIgnored(AXUIElementRef root,float x,float y,AXUIElementRef*elem,long includingIgnored,long rcx,long r8,long r9);
             cc("AXUIElementCopyElementAtPositionEx",_AXUIElementCopyElementAtPositionIncludeIgnored
                (axSystem,point.x,point.y,&elem,false,0,0,0));
             CFTypeRef v;cc("AXUIECAV-ROLE",AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&v));
             if(!CFEqual(kAXMenuBarItemRole,v))break;
-            AXError error=AXUIElementCopyAttributeValue(elem,(CFTypeRef)@"AXClassName",&v);
-            if(error){
-                if(kAXErrorAttributeUnsupported!=error)cc("AXUIECAV-AXCN",error);
-                cc("AXUIECAV-DESC",AXUIElementCopyAttributeValue(elem,kAXDescriptionAttribute,&v));
-                if(![(__bridge NSString*)v hasPrefix:@"Wi-Fi, "])break;
-                CGEventFlags f=CGEventGetFlags(event);
-                if(!(f&kCGEventFlagMaskAlternate)){
-                    f|=kCGEventFlagMaskAlternate;
-                    CGEventSetFlags(event,f);
-                }
-            }else{
-                cc("I'm feeling lucky!",1);
-                NSLog(@"%@",v);
+            // fuck Apple! again and again!
+            // AXError error=AXUIElementCopyAttributeValue(elem,(CFTypeRef)@"AXClassName",&v);
+            cc("AXUIECAV-DESC",AXUIElementCopyAttributeValue(elem,kAXDescriptionAttribute,&v));
+            if(![(__bridge NSString*)v hasPrefix:@"Wi-Fi, "])break;
+            CGEventFlags f=CGEventGetFlags(event);
+            if(!(f&kCGEventFlagMaskAlternate)){
+                f|=kCGEventFlagMaskAlternate;
+                CGEventSetFlags(event,f);
             }
         }
     }while(false);
