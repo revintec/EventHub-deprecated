@@ -16,12 +16,13 @@
 @end
 @implementation AppDelegate
 
-bool doptDisableAllFiltering=true;
-bool doptDisableWordByWord;
+#define DOPT_DEFAULT_MODE          DOPT_ENABLE_WORD_BY_WORD
+#define DOPT_DISABLE_ALL_FILTERING 0x00000000
+#define DOPT_FILTEROUT_CAPSLOCK    0x00000001
+#define DOPT_ENABLE_WORD_BY_WORD   0x00000002
+#define DOPT_REPLACE_DELETECMB     0
 
-bool optFilterWordByWord;
-bool optFilterCapslock;
-//bool optFilterDelete;
+unsigned int gopts,dopts;
 
 bool smallHalt;CGEventFlags cachedEvFlags;
 -(void)unhalt{smallHalt=false;}
@@ -66,9 +67,9 @@ CFTypeRef kAXTextInputMarkedRangeAttribute=@"AXTextInputMarkedRange";
     doptPTIOe=nil;
 }
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
-    if(doptDisableAllFiltering)return event;
+    unsigned int opts=gopts&dopts;
     
-    if(!doptDisableWordByWord&&optFilterWordByWord)do{
+    if(opts&DOPT_ENABLE_WORD_BY_WORD)do{
         if(type!=kCGEventKeyDown)break;
         if(doptPTIOe){
             [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedOperationOnAXT)object:nil];
@@ -90,7 +91,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         doptPTIOe=elem;[self performSelector:@selector(delayedOperationOnAXT)withObject:nil afterDelay:0.1];
     }while(false);
     
-    if(optFilterCapslock){
+    if(opts&DOPT_FILTEROUT_CAPSLOCK){
         if(type==kCGEventKeyDown||type==kCGEventKeyUp){
             CGEventFlags f=CGEventGetFlags(event);
             if(f&kCGEventFlagMaskAlphaShift){
@@ -169,12 +170,13 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     NSDictionary*_n=[notification userInfo];if(!_n)return;
     NSRunningApplication*ra=[_n objectForKey:NSWorkspaceApplicationKey];if(!ra)return;
     NSString*name=[ra localizedName];
-    doptDisableWordByWord=[@"IntelliJ IDEA"isEqual:name];
-    bool cache=doptDisableAllFiltering;
-    doptDisableAllFiltering=self.options[name];
-    if(cache&&!doptDisableAllFiltering)
+    NSNumber*opt=self.options[name];
+    if(opt)dopts=[opt unsignedIntValue];
+    else dopts=DOPT_DEFAULT_MODE;
+    // refresh modifierFlags state
+    if(gopts&dopts&DOPT_FILTEROUT_CAPSLOCK)
         cachedEvFlags=[NSEvent modifierFlags];
-//    NSLog(@"%@ %d",name,doptDisableAllFiltering);
+    NSLog(@"dopt %@: %x",name,dopts);
 }
 -(void)fatalWithText:(NSString*)msg{
     NSRunningApplication*ra=[NSRunningApplication currentApplication];
@@ -204,16 +206,15 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 }
 -(void)applicationDidResignActive:(NSNotification*)notification{
     CGEventMask interest=0;
-    if(optFilterCapslock)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp)|CGEventMaskBit(kCGEventFlagsChanged);
+    if(gopts&DOPT_ENABLE_WORD_BY_WORD)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
+    if(gopts&DOPT_FILTEROUT_CAPSLOCK) interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp)|CGEventMaskBit(kCGEventFlagsChanged);
 //    if(optFilterDelete)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
-    
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
         if(self.eventTap){
             CFRunLoopSourceRef rp=CFMachPortCreateRunLoopSource(kCFAllocatorDefault,self.eventTap,0);
             CFRunLoopAddSource(CFRunLoopGetMain(),rp,kCFRunLoopDefaultMode);
         }else[self fatalWithText:@"Can't create CGEventTap"];
-        
         // if not selecting any insterests, keep the window
         ProcessSerialNumber psn={0,kCurrentProcess};
         TransformProcessType(&psn,kProcessTransformToUIElementApplication);
@@ -226,19 +227,18 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     // don't move this line, it's also used in
     // -(void)someotherAppGotActivated:(NSNotification*)notification
     // to update cachedEvFlags
-    doptDisableAllFiltering=true;
+    dopts=0; // temporary disable all functions when we're foreground
     if(self.eventTap){
         CFRelease(self.eventTap);
         self.eventTap=nil;
     }
     // TODO add settings panel instead of hard-code options
     self.options=[NSMutableDictionary new];
-    id opt=(__bridge id)kCFBooleanTrue;
-    self.options[@"Remote Desktop Connection"]=opt;
-    self.options[@"VMware Fusion"]=opt;
-
-    optFilterWordByWord=true;
-    optFilterCapslock=true;
-//    optFilterDelete=true;
+#define setopt(app,opt) self.options[@app]=[NSNumber numberWithUnsignedInt:opt]
+    setopt("Remote Desktop Connection",DOPT_DISABLE_ALL_FILTERING);
+    setopt("VMware Fusion",            DOPT_DISABLE_ALL_FILTERING);
+    setopt("IntelliJ IDEA",            DOPT_FILTEROUT_CAPSLOCK);
+    
+    gopts=0xFFFFFFFF; // enable all filtering by default
 }
 @end
