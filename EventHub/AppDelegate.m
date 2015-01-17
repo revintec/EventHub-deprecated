@@ -32,12 +32,16 @@ __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
--(void)delayedPostFPCs{
-    CGEventTapLocation loc=kCGSessionEventTap;
-    CGEventPost(loc,cgevFPCD);
-    CGEventPost(loc,cgevFPCU);
-    CGEventPost(loc,cgevFPCD);
-    CGEventPost(loc,cgevFPCU);
+static inline void sendFPCs(){
+    CGEventPost(kCGSessionEventTap,cgevFPCD);
+    CGEventPost(kCGSessionEventTap,cgevFPCU);
+}
+-(void)delayedPostFPCsStage2{
+    sendFPCs();
+}
+-(void)delayedPostFPCsStage1{
+    sendFPCs();
+    [self performSelector:@selector(delayedPostFPCsStage2)withObject:nil afterDelay:0.03];
 }
 CGEventTimestamp lastClickTimestamp;
 #define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
@@ -82,8 +86,9 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             // double click may be used to select some text
             // and to be replaced by new text typed
             // so we still need to show IME tip
-            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCs)object:nil];
-            [self performSelector:@selector(delayedPostFPCs)withObject:nil afterDelay:0.3];
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCsStage1)object:nil];
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCsStage2)object:nil];
+            [self performSelector:@selector(delayedPostFPCsStage1)withObject:nil afterDelay:0.3];
         }
     }while(false);
     
