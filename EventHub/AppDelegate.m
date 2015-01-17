@@ -188,6 +188,7 @@ static inline bool setCapslockLED(bool on){
     }setCapslockLED(false);
 }
 -(void)applicationWillTerminate:(NSNotification*)aNotification{
+    if(!self.window)return;
     [self undoAllChanges];
     if(devKeyboard)IOHIDDeviceClose(devKeyboard,kIOHIDOptionsTypeNone);
 }
