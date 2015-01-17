@@ -85,10 +85,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     return event;
 }
 -(void)someotherAppGotActivated:(NSNotification*)notification{
-    if(!self.window){
-        [NSApp terminate:self];
-        return;
-    }
+    if(!self.window)return;
     NSDictionary*_n=[notification userInfo];if(!_n)return;
     NSRunningApplication*ra=[_n objectForKey:NSWorkspaceApplicationKey];if(!ra)return;
     NSString*name=[ra localizedName];
@@ -199,10 +196,7 @@ static inline bool setCapslockLED(bool on){
     if(devKeyboard)IOHIDDeviceClose(devKeyboard,kIOHIDOptionsTypeNone);
 }
 -(void)applicationDidResignActive:(NSNotification*)notification{
-    if(!self.window){
-        [NSApp terminate:self];
-        return;
-    }
+    if(!self.window)return;
     CGEventMask interest=0;
     if(gopts&DOPT_AIRPORTEXTRA_ALT)   interest|=CGEventMaskBit(kCGEventLeftMouseDown);
     if(gopts&DOPT_SHOWIME_AFTER_CLICK)interest|=CGEventMaskBit(kCGEventLeftMouseDown);
@@ -221,10 +215,7 @@ static inline bool setCapslockLED(bool on){
 }
 // update configuration inside this file
 -(void)applicationWillBecomeActive:(NSNotification*)notification{
-    if(!self.window){
-        [NSApp terminate:self];
-        return;
-    }
+    if(!self.window)return;
     ProcessSerialNumber psn={0,kCurrentProcess};
     TransformProcessType(&psn,kProcessTransformToForegroundApplication);
     [self undoAllChanges]; // temporary disable all functions when we're foreground
