@@ -7,6 +7,7 @@
 //
 
 #import "AppDelegate.h"
+#import <IOKit/hid/IOHIDUsageTables.h>
 #import <AudioToolbox/AudioToolbox.h>
 
 @interface AppDelegate()
@@ -24,7 +25,7 @@
 AXUIElementRef axSystem;
 unsigned int gopts,dopts;
 
-static inline CGEventFlags ugcFlags(CGEventRef event){
+__unused static inline CGEventFlags ugcFlags(CGEventRef event){
     CGEventFlags f=CGEventGetFlags(event);
     f&=NSDeviceIndependentModifierFlagsMask;
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
@@ -97,10 +98,66 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     [NSApp terminate:self];
 }
 -(IBAction)quitApp:(id)sender{[NSApp terminate:sender];}
+#pragma mark HID
+static inline CFDictionaryRef createMatchingDict(bool isDevice,uint32_t inUsagePage,uint32_t inUsage){
+    if(inUsagePage){
+        NSMutableDictionary*dic=[NSMutableDictionary new];
+        id keyPage=(__bridge id)(isDevice?CFSTR(kIOHIDDeviceUsagePageKey):CFSTR(kIOHIDElementUsagePageKey));
+        dic[keyPage]=[NSNumber numberWithUnsignedInt:inUsagePage];
+        // note: the usage is only valid if the usage page is also defined
+        if(inUsage){
+            id keyUsage=(__bridge id)(isDevice?CFSTR(kIOHIDDeviceUsageKey):CFSTR(kIOHIDElementUsageKey));
+            dic[keyUsage]=[NSNumber numberWithUnsignedInt:inUsage];
+        }return CFBridgingRetain(dic);
+    }return nil;
+}
+IOHIDDeviceRef devKeyboard;IOHIDElementRef elemKeyboardLedCapslock;
+IOHIDValueRef oofON,oofOFF;
+static inline void initializeHID(){
+    {
+        IOHIDManagerRef mgr=IOHIDManagerCreate(kCFAllocatorDefault,kIOHIDOptionsTypeNone);
+        if(!mgr)return;
+        CFDictionaryRef criteria=createMatchingDict(true,kHIDPage_GenericDesktop,kHIDUsage_GD_Keyboard);
+        IOHIDManagerSetDeviceMatching(mgr,criteria);
+        CFRelease(criteria);
+        if(kIOReturnSuccess!=IOHIDManagerOpen(mgr,kIOHIDOptionsTypeNone)){IOHIDManagerClose(mgr,kIOHIDOptionsTypeNone);return;}
+        CFSetRef devices=IOHIDManagerCopyDevices(mgr);
+        IOHIDManagerClose(mgr,kIOHIDOptionsTypeNone);
+        if(!devices)return;
+        CFIndex count=CFSetGetCount(devices);
+        NSLog(@"%ld devices found",count);
+        if(count==1)CFSetGetValues(devices,(void*)&devKeyboard);
+        CFRelease(devices);
+    }if(!devKeyboard)return;
+    if(kIOReturnSuccess!=IOHIDDeviceOpen(devKeyboard,kIOHIDOptionsTypeNone)){
+        devKeyboard=nil;
+        return;
+    }
+    {
+        CFDictionaryRef criteria=createMatchingDict(false,kHIDPage_LEDs,kHIDUsage_LED_CapsLock);
+        CFArrayRef elems=IOHIDDeviceCopyMatchingElements(devKeyboard,criteria,kIOHIDOptionsTypeNone);
+        CFIndex count=CFArrayGetCount(elems);
+        NSLog(@"with %ld elements",count);
+        if(count==1)elemKeyboardLedCapslock=(void*)CFArrayGetValueAtIndex(elems,0);
+        CFRelease(elems);
+    }if(!elemKeyboardLedCapslock)return;
+    oofON= IOHIDValueCreateWithIntegerValue(kCFAllocatorDefault,elemKeyboardLedCapslock,0,true);
+    oofOFF=IOHIDValueCreateWithIntegerValue(kCFAllocatorDefault,elemKeyboardLedCapslock,0,false);
+}
+static inline bool setCapslockLED(bool on){
+    return kIOReturnSuccess==IOHIDDeviceSetValue(devKeyboard,elemKeyboardLedCapslock,on?oofON:oofOFF);
+}
+#pragma mark end HID
 -(void)applicationDidFinishLaunching:(NSNotification*)aNotification{
     if(!AXIsProcessTrusted()){
         [self.window close];
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
+        return;
+    }
+    initializeHID();
+    if(!devKeyboard||!elemKeyboardLedCapslock){
+        [self.window close];
+        [self fatalWithText:@"Error initializing HID"];
         return;
     }
     axSystem=AXUIElementCreateSystemWide();
@@ -112,10 +169,11 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     if(self.eventTap){
         CFRelease(self.eventTap);
         self.eventTap=nil;
-    }
+    }setCapslockLED(false);
 }
 -(void)applicationWillTerminate:(NSNotification*)aNotification{
     [self undoAllChanges];
+    if(devKeyboard)IOHIDDeviceClose(devKeyboard,kIOHIDOptionsTypeNone);
 }
 -(void)applicationDidResignActive:(NSNotification*)notification{
     CGEventMask interest=0;
@@ -131,6 +189,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         // if not selecting any insterests, keep the window
         ProcessSerialNumber psn={0,kCurrentProcess};
         TransformProcessType(&psn,kProcessTransformToUIElementApplication);
+        setCapslockLED(true);
     }// else, not selecting any insterests, keep the window
 }
 // update configuration inside this file
