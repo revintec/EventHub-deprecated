@@ -39,6 +39,7 @@ __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     CGEventPost(loc,cgevFPCD);
     CGEventPost(loc,cgevFPCU);
 }
+CGEventTimestamp lastClickTimestamp;
 #define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
@@ -69,12 +70,17 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         }
     }while(false);
     
-    if(opts&DOPT_SHOWIME_AFTER_CLICK){
+    if(opts&DOPT_SHOWIME_AFTER_CLICK)do{
         if(type==kCGEventLeftMouseDown){
+            CGEventTimestamp timestamp=CGEventGetTimestamp(event);
+            if(!timestamp)break;// maybe CGEventPost(CGEventCreate(...)) will have 0 timestamp if not set?
+            CGEventTimestamp difftime=timestamp-lastClickTimestamp;
+            lastClickTimestamp+=difftime;
+            if(difftime<=1000)break;
             [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCs)object:nil];
-            [self performSelector:@selector(delayedPostFPCs)withObject:nil afterDelay:0.1];
+            [self performSelector:@selector(delayedPostFPCs)withObject:nil afterDelay:0.3];
         }
-    }
+    }while(false);
     
     return event;
 }
