@@ -17,13 +17,14 @@
 @end
 @implementation AppDelegate
 
-#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT
+#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_SHOWIME_AFTER_CLICK
 #define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT
-#define DOPT_FILTEROUT_CAPSLOCK    0x00000001
-#define DOPT_AIRPORTEXTRA_ALT      0x00000002
+#define DOPT_AIRPORTEXTRA_ALT      0x00000001
+#define DOPT_SHOWIME_AFTER_CLICK   0x00000002
 
 AXUIElementRef axSystem;
 unsigned int gopts,dopts;
+CGEventRef cgevFPCD,cgevFPCU; // used to trigger Ctrl-DN-UP-DN-UP sequence when mouse clicks
 
 __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     CGEventFlags f=CGEventGetFlags(event);
@@ -31,24 +32,16 @@ __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
+-(void)delayedPostFPCs{
+    CGEventTapLocation loc=kCGSessionEventTap;
+    CGEventPost(loc,cgevFPCD);
+    CGEventPost(loc,cgevFPCU);
+    CGEventPost(loc,cgevFPCD);
+    CGEventPost(loc,cgevFPCU);
+}
 #define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
-    
-    if(opts&DOPT_FILTEROUT_CAPSLOCK){
-        if(type==kCGEventKeyDown||type==kCGEventKeyUp){
-            CGEventFlags f=CGEventGetFlags(event);
-            if(f&kCGEventFlagMaskAlphaShift){
-                // KNOWN BUG: Chrome <input type="password"/>
-                // won't respect our setting here.
-                // if you input password while CAPSLOCK is on,
-                // you'll enter all alphabet in upper case.
-                // this can't be fixed with CGEventKeyboardSetUnicodeString
-                f&=~kCGEventFlagMaskAlphaShift;
-                CGEventSetFlags(event,f);
-            }
-        }
-    }
     
     if(opts&DOPT_AIRPORTEXTRA_ALT)do{
         if(type==kCGEventLeftMouseDown){
@@ -75,6 +68,13 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             }
         }
     }while(false);
+    
+    if(opts&DOPT_SHOWIME_AFTER_CLICK){
+        if(type==kCGEventLeftMouseDown){
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCs)object:nil];
+            [self performSelector:@selector(delayedPostFPCs)withObject:nil afterDelay:0.1];
+        }
+    }
     
     return event;
 }
@@ -154,6 +154,15 @@ static inline bool setCapslockLED(bool on){
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
         return;
     }
+    cgevFPCD=CGEventCreateKeyboardEvent(nil,kVK_Control,true);
+    cgevFPCU=CGEventCreateKeyboardEvent(nil,kVK_Control,false);
+    if(!cgevFPCD||!cgevFPCU){
+        if(cgevFPCD)CFRelease(cgevFPCD);
+        if(cgevFPCU)CFRelease(cgevFPCU);
+        [self.window close];
+        [self fatalWithText:@"Can't create CGEvents"];
+        return;
+    }
     initializeHID();
     if(!devKeyboard||!elemKeyboardLedCapslock){
         [self.window close];
@@ -177,8 +186,8 @@ static inline bool setCapslockLED(bool on){
 }
 -(void)applicationDidResignActive:(NSNotification*)notification{
     CGEventMask interest=0;
-    if(gopts&DOPT_FILTEROUT_CAPSLOCK)interest|=CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventKeyUp);
-    if(gopts&DOPT_AIRPORTEXTRA_ALT)  interest|=CGEventMaskBit(kCGEventLeftMouseDown);
+    if(gopts&DOPT_AIRPORTEXTRA_ALT)   interest|=CGEventMaskBit(kCGEventLeftMouseDown);
+    if(gopts&DOPT_SHOWIME_AFTER_CLICK)interest|=CGEventMaskBit(kCGEventLeftMouseDown);
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
@@ -202,7 +211,6 @@ static inline bool setCapslockLED(bool on){
 #define setopt(app,opt) self.options[@app]=[NSNumber numberWithUnsignedInt:DOPT_DISABLE_ALL_FILTERING|opt]
     setopt("Remote Desktop Connection",DOPT_DISABLE_ALL_FILTERING);
     setopt("VMware Fusion",            DOPT_DISABLE_ALL_FILTERING);
-    setopt("IntelliJ IDEA",            DOPT_FILTEROUT_CAPSLOCK);
     
     gopts=0xFFFFFFFF; // enable all filtering by default
 }
