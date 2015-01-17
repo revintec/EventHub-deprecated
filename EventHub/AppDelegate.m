@@ -77,7 +77,11 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             timestamp/=1000000;// to ms resolution
             CGEventTimestamp difftime=timestamp-lastClickTimestamp;
             lastClickTimestamp+=difftime;
-            if(difftime<=1000)break;
+            if(difftime<=800)break;
+            // do not move the following line before if(...)break;
+            // double click may be used to select some text
+            // and to be replaced by new text typed
+            // so we still need to show IME tip
             [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCs)object:nil];
             [self performSelector:@selector(delayedPostFPCs)withObject:nil afterDelay:0.3];
         }
