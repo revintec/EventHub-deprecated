@@ -74,6 +74,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         if(type==kCGEventLeftMouseDown){
             CGEventTimestamp timestamp=CGEventGetTimestamp(event);
             if(!timestamp)break;// maybe CGEventPost(CGEventCreate(...)) will have 0 timestamp if not set?
+            timestamp/=1000000;// to ms resolution
             CGEventTimestamp difftime=timestamp-lastClickTimestamp;
             lastClickTimestamp+=difftime;
             if(difftime<=1000)break;
