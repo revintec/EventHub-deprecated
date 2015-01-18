@@ -17,9 +17,10 @@
 @end
 @implementation AppDelegate
 
-#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT
-#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT
+#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN
+#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN
 #define DOPT_AIRPORTEXTRA_ALT      0x00000001
+#define DOPT_POWER_LOCKSCREEN      0x00000002
 
 ProcessSerialNumber myPsn={0,kCurrentProcess};
 AXUIElementRef axSystem;
@@ -32,13 +33,67 @@ __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
-
+-(int)sleepDisplayNow{
+    int exit=system("pmset displaysleepnow");
+    if(exit){
+        NSLog(@"system(pmset): %d at %s(line %d)",exit,__PRETTY_FUNCTION__,__LINE__);
+        AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+    }return exit;
+}
+CGEventTimestamp powerDown;
 #define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
+#define xx(errormsg,axerror) if(axerror){NSLog(@"%s: %x at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
+    // defaults write com.apple.loginwindow PowerButtonSleepsSystem -bool false
+    if(opts&DOPT_POWER_LOCKSCREEN){
+        if(type==NSSystemDefined){
+            NSEvent*ex=[NSEvent eventWithCGEvent:event];
+            NSEventSubtype sub=ex.subtype;
+            if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
+                NSUInteger data1=ex.data1;
+                CGKeyCode keycode=data1>>16;
+                // power button should have its ex.data2 0
+                if(keycode==NX_POWER_KEY&&!ex.data2){
+                    CGKeyCode flags=data1&0xFF00;
+//                    CGKeyCode isRepeat=data1&0xFF;
+#define SPECIAL_KEY_DOWN 0x0a00
+#define SPECIAL_KEY_UP   0x0b00
+                    switch(flags){
+                        case SPECIAL_KEY_DOWN:
+                            cc("check last power down time",!!powerDown);
+                            powerDown=CGEventGetTimestamp(event)/1000000;
+                            break;
+                        case SPECIAL_KEY_UP:
+                            cc("check last power down time",!powerDown);
+                            powerDown=CGEventGetTimestamp(event)/1000000-powerDown;
+                            NSLog(@"%d ms",(int)powerDown);
+                            if(300<powerDown&&powerDown<500){
+//                                typedef uint64_t CGSSessionID;
+//                                CGSSessionID session;
+//                                CG_EXTERN CGError CGSCreateLoginSession(CGSSessionID*outSession);
+//                                cc("CGSCLS",CGSCreateLoginSession(&session));
+//                                NSLog(@"Session: %llu",session);
+                                [self performSelectorInBackground:@selector(sleepDisplayNow)withObject:nil];
+                            }powerDown=0;
+                            break;
+                        default:
+                            xx("unknown flags",flags);
+                            break;
+                    }
+                }
+            }else if(sub==NX_SUBTYPE_POWER_KEY){
+                // power button should have its ex.dataX 0
+                if(!ex.data1&&!ex.data2){
+                    
+                }
+            }
+        }
+    }
+    
     if(opts&DOPT_AIRPORTEXTRA_ALT)do{
-        if(type==kCGEventLeftMouseDown){
+        if(type==NSLeftMouseDown){
             CGPoint point=CGEventGetLocation(event);
             // not in the upper-right corner, so can't hit AirPortExtra
             // DynamicLyrics.app's, Bartender.app's MenuBarExtra donesn't
@@ -179,7 +234,8 @@ static inline bool setCapslockLED(bool on){
 -(void)applicationDidResignActive:(NSNotification*)notification{
     if(!self.window)return;
     CGEventMask interest=0;
-    if(gopts&DOPT_AIRPORTEXTRA_ALT)interest|=CGEventMaskBit(kCGEventLeftMouseDown);
+    if(gopts&DOPT_AIRPORTEXTRA_ALT)interest|=NSLeftMouseDownMask;
+    if(gopts&DOPT_POWER_LOCKSCREEN)interest|=NSSystemDefinedMask;
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
