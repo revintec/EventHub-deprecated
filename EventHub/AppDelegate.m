@@ -27,15 +27,26 @@ AXUIElementRef axSystem;
 unsigned int gopts,dopts;
 CGEventRef cgevFPCD,cgevFPCU; // used to trigger Ctrl-DN-UP-DN-UP sequence when mouse clicks
 
+#pragma mark PRIVILAGED CODE START
+// these function may involves IPC to daemon process
+// they are currently not working due to security reasons
+static inline int suspendLoginProcess(){
+    return kill(pidOfLoginProcess,SIGSTOP);
+}
+static inline int resumeLoginProcess(){
+    return kill(pidOfLoginProcess,SIGCONT);
+}
+#pragma mark PRIVILAGED CODE END
+
 __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     CGEventFlags f=CGEventGetFlags(event);
     f&=NSDeviceIndependentModifierFlagsMask;
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
-CGEventTimestamp powerDown;
-#define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
-#define xx(errormsg,axerror) if(axerror){NSLog(@"%s: %x at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
+CGEventTimestamp powerDown;pid_t pidOfLoginProcess;
+#define cc(errormsg,axerror) {if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}}
+#define xx(errormsg,axerror) {if(axerror){NSLog(@"%s: %x at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}}
 static inline int sleepDisplayNow(){
     kern_return_t error=KERN_FAILURE;
     do{
@@ -53,7 +64,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     unsigned int opts=gopts&dopts;
     
     // defaults write com.apple.loginwindow PowerButtonSleepsSystem -bool false
-    if(opts&DOPT_POWER_LOCKSCREEN){
+    if(opts&DOPT_POWER_LOCKSCREEN&&pidOfLoginProcess)do{
         if(type==NSSystemDefined){
             NSEvent*ex=[NSEvent eventWithCGEvent:event];
             NSEventSubtype sub=ex.subtype;
@@ -72,6 +83,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                             powerDown=CGEventGetTimestamp(event)/1000000;
                             break;
                         case SPECIAL_KEY_UP:
+                            cc("kill -CONT loginwindow",resumeLoginProcess());
                             // disassemble from /System/Library/CoreServices/loginwindow.app
 #define _powerButtonDebounceTime ((int)(0.35*1000))
 #define _powerButtonShutdownUITime ((int)(1.5*1000))
@@ -94,12 +106,11 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                 }
             }else if(sub==NX_SUBTYPE_POWER_KEY){
                 // power button should have its ex.dataX 0
-                if(!ex.data1&&!ex.data2){
-                    NSLog(@"SUBTYPE_POWER_KEY");
-                }
+                if(!ex.data1&&!ex.data2)
+                    cc("kill -STOP loginwindow",suspendLoginProcess());
             }
         }
-    }
+    }while(false);
     
     if(opts&DOPT_AIRPORTEXTRA_ALT)do{
         if(type==NSLeftMouseDown){
@@ -201,12 +212,25 @@ static inline bool setCapslockLED(bool on){
 }
 #pragma mark end HID
 -(void)applicationDidFinishLaunching:(NSNotification*)aNotification{
+    if(geteuid()){
+        [self.window close];
+        self.window=nil;
+        [self fatalWithText:@"Not running as root"];
+        return;
+    }
     if(!AXIsProcessTrusted()){
         [self.window close];
         self.window=nil;
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
         return;
     }
+    NSArray*apps=[NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.loginwindow"];
+    if([apps count]!=1){
+        [self.window close];
+        self.window=nil;
+        [self fatalWithText:@"Can't lock on login process"];
+        return;
+    }pidOfLoginProcess=[[apps objectAtIndex:0]processIdentifier];
     cgevFPCD=CGEventCreateKeyboardEvent(nil,kVK_Control,true);
     cgevFPCU=CGEventCreateKeyboardEvent(nil,kVK_Control,false);
     if(!cgevFPCD||!cgevFPCU){
