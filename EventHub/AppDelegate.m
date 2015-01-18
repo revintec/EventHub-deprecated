@@ -92,7 +92,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             }else if(sub==NX_SUBTYPE_POWER_KEY){
                 // power button should have its ex.dataX 0
                 if(!ex.data1&&!ex.data2){
-                    
+                    NSLog(@"SUBTYPE_POWER_KEY");
                 }
             }
         }
