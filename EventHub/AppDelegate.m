@@ -33,16 +33,22 @@ __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
--(int)sleepDisplayNow{
-    int exit=system("pmset displaysleepnow");
-    if(exit){
-        NSLog(@"system(pmset): %d at %s(line %d)",exit,__PRETTY_FUNCTION__,__LINE__);
-        AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
-    }return exit;
-}
 CGEventTimestamp powerDown;
 #define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
 #define xx(errormsg,axerror) if(axerror){NSLog(@"%s: %x at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
+static inline int sleepDisplayNow(){
+    kern_return_t error=KERN_FAILURE;
+    do{
+        io_registry_entry_t io=IORegistryEntryFromPath(kIOMasterPortDefault,"IOService:/IOResources/IODisplayWrangler");
+        cc("IOREFP",io==MACH_PORT_NULL);
+        error=IORegistryEntrySetCFProperty(io,(CFStringRef)@"IORequestIdle",kCFBooleanTrue);
+        IOObjectRelease(io); // ignore error
+        cc("IORESP",error);
+        return KERN_SUCCESS;
+    }while(false);
+    AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+    return error;
+}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
@@ -75,7 +81,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 //                                CG_EXTERN CGError CGSCreateLoginSession(CGSSessionID*outSession);
 //                                cc("CGSCLS",CGSCreateLoginSession(&session));
 //                                NSLog(@"Session: %llu",session);
-                                [self performSelectorInBackground:@selector(sleepDisplayNow)withObject:nil];
+                                sleepDisplayNow();
                             }powerDown=0;
                             break;
                         default:
