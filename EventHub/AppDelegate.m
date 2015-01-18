@@ -21,6 +21,7 @@
 #define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT
 #define DOPT_AIRPORTEXTRA_ALT      0x00000001
 
+ProcessSerialNumber myPsn={0,kCurrentProcess};
 AXUIElementRef axSystem;
 unsigned int gopts,dopts;
 CGEventRef cgevFPCD,cgevFPCU; // used to trigger Ctrl-DN-UP-DN-UP sequence when mouse clicks
@@ -187,16 +188,14 @@ static inline bool setCapslockLED(bool on){
             CFRunLoopAddSource(CFRunLoopGetMain(),rp,kCFRunLoopDefaultMode);
         }else[self fatalWithText:@"Can't create CGEventTap"];
         // if not selecting any insterests, keep the window
-        ProcessSerialNumber psn={0,kCurrentProcess};
-        TransformProcessType(&psn,kProcessTransformToUIElementApplication);
+        TransformProcessType(&myPsn,kProcessTransformToUIElementApplication);
         setCapslockLED(true);
     }// else, not selecting any insterests, keep the window
 }
 // update configuration inside this file
 -(void)applicationWillBecomeActive:(NSNotification*)notification{
     if(!self.window)return;
-    ProcessSerialNumber psn={0,kCurrentProcess};
-    TransformProcessType(&psn,kProcessTransformToForegroundApplication);
+    TransformProcessType(&myPsn,kProcessTransformToForegroundApplication);
     [self undoAllChanges]; // temporary disable all functions when we're foreground
     // TODO add settings panel instead of hard-code options
     self.options=[NSMutableDictionary new];
