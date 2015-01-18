@@ -17,10 +17,9 @@
 @end
 @implementation AppDelegate
 
-#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_SHOWIME_AFTER_CLICK
+#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT
 #define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT
 #define DOPT_AIRPORTEXTRA_ALT      0x00000001
-#define DOPT_SHOWIME_AFTER_CLICK   0x00000002
 
 AXUIElementRef axSystem;
 unsigned int gopts,dopts;
@@ -32,18 +31,7 @@ __unused static inline CGEventFlags ugcFlags(CGEventRef event){
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
-static inline void sendFPCs(){
-    CGEventPost(kCGSessionEventTap,cgevFPCD);
-    CGEventPost(kCGSessionEventTap,cgevFPCU);
-}
--(void)delayedPostFPCsStage2{
-    sendFPCs();
-}
--(void)delayedPostFPCsStage1{
-    sendFPCs();
-    [self performSelector:@selector(delayedPostFPCsStage2)withObject:nil afterDelay:0.03];
-}
-CGEventTimestamp lastClickTimestamp;
+
 #define cc(errormsg,axerror) if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
@@ -71,24 +59,6 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                 f|=kCGEventFlagMaskAlternate;
                 CGEventSetFlags(event,f);
             }
-        }
-    }while(false);
-    
-    if(opts&DOPT_SHOWIME_AFTER_CLICK)do{
-        if(type==kCGEventLeftMouseDown){
-            CGEventTimestamp timestamp=CGEventGetTimestamp(event);
-            if(!timestamp)break;// maybe CGEventPost(CGEventCreate(...)) will have 0 timestamp if not set?
-            timestamp/=1000000;// to ms resolution
-            CGEventTimestamp difftime=timestamp-lastClickTimestamp;
-            lastClickTimestamp+=difftime;
-            if(difftime<=1800)break;
-            // do not move the following line before if(...)break;
-            // double click may be used to select some text
-            // and to be replaced by new text typed
-            // so we still need to show IME tip
-            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCsStage1)object:nil];
-            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedPostFPCsStage2)object:nil];
-            [self performSelector:@selector(delayedPostFPCsStage1)withObject:nil afterDelay:0.3];
         }
     }while(false);
     
@@ -208,8 +178,7 @@ static inline bool setCapslockLED(bool on){
 -(void)applicationDidResignActive:(NSNotification*)notification{
     if(!self.window)return;
     CGEventMask interest=0;
-    if(gopts&DOPT_AIRPORTEXTRA_ALT)   interest|=CGEventMaskBit(kCGEventLeftMouseDown);
-    if(gopts&DOPT_SHOWIME_AFTER_CLICK)interest|=CGEventMaskBit(kCGEventLeftMouseDown);
+    if(gopts&DOPT_AIRPORTEXTRA_ALT)interest|=CGEventMaskBit(kCGEventLeftMouseDown);
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
