@@ -72,10 +72,13 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                             powerDown=CGEventGetTimestamp(event)/1000000;
                             break;
                         case SPECIAL_KEY_UP:
+                            // disassemble from /System/Library/CoreServices/loginwindow.app
+#define _powerButtonDebounceTime ((int)(0.35*1000))
+#define _powerButtonShutdownUITime ((int)(1.5*1000))
                             cc("check last power down time",!powerDown);
                             powerDown=CGEventGetTimestamp(event)/1000000-powerDown;
                             NSLog(@"%d ms",(int)powerDown);
-                            if(300<powerDown&&powerDown<500){
+                            if(_powerButtonDebounceTime<powerDown&&powerDown<_powerButtonShutdownUITime){
 //                                typedef uint64_t CGSSessionID;
 //                                CGSSessionID session;
 //                                CG_EXTERN CGError CGSCreateLoginSession(CGSSessionID*outSession);
