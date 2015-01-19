@@ -118,7 +118,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     
     if(opts&DOPT_AIRPORTEXTRA_ALT)do{
         if(type==NSLeftMouseDown){
-            CGPoint point=CGEventGetLocation(event);
+            CGPoint point=CGEventGetLocation(event); // 0,0 at upper-left
             // not in the upper-right corner, so can't hit AirPortExtra
             // DynamicLyrics.app's, Bartender.app's MenuBarExtra donesn't
             // have kAXDescriptionAttribute, and will cause our app to bailout
@@ -217,6 +217,10 @@ static inline bool setCapslockLED(bool on){
 }
 #pragma mark end HID
 -(void)applicationDidFinishLaunching:(NSNotification*)aNotification{
+    // if(geteuid()) ...not running as root, suspend/resume LoginProcess will fail...
+    // to run ourself as root, authenticate first, then run the following:
+    // sudo -b /path/to/our/app/EventHub.app/Contents/MacOS/EventHub
+    // -b prevent parent process(i.e. us) to wait the new EventHub.app(root)
     if(!AXIsProcessTrusted()){
         [self.window close];
         self.window=nil;
