@@ -58,8 +58,11 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                 // power button should have its ex.dataX 0
                 if(!ex.data1&&!ex.data2){
                     CGEventFlags flags=ugcFlags(event);
-                    if(flags==kCGEventFlagMaskCommand)
+                    if(flags==kCGEventFlagMaskCommand){
                         sleepDisplayNow();
+                        // kill this event or the system will beep
+                        return nil;
+                    }
                 }
             }
         }
