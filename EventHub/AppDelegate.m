@@ -144,7 +144,8 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                         cc("sleepSystemNow",sleepSystemNow());
                     }else if(!flags){
                         NSLog(@"suspend loginwindow");
-                        // seems too late
+                        // seems too late, by the time we suspend it
+                        // it already got NX_SUBTYPE_AUX_CONTROL_BUTTONS(keycode PowerButton)
                         cc("suspend loginwindow",daemonTransact(PROTO_SUSPEND_LOGINWINDOW));
                     }
                 }
