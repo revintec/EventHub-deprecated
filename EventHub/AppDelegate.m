@@ -60,8 +60,9 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                     CGEventFlags flags=ugcFlags(event);
                     if(flags==kCGEventFlagMaskCommand){
                         sleepDisplayNow();
-                        // kill this event or the system will beep
-                        return nil;
+                        // no need to kill this event
+                        // system still beeps even if we do
+                        // return nil;
                     }
                 }
             }
