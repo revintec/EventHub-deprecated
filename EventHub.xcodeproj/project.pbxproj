@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1131AF811A6CDFB90052E821 /* SecurityFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1131AF801A6CDFB90052E821 /* SecurityFoundation.framework */; };
 		11A7EF011A5134270093CB43 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 11A7EF001A5134270093CB43 /* AppDelegate.m */; };
 		11A7EF031A5134270093CB43 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 11A7EF021A5134270093CB43 /* main.m */; };
 		11A7EF051A5134270093CB43 /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11A7EF041A5134270093CB43 /* Images.xcassets */; };
@@ -25,6 +26,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1131AF801A6CDFB90052E821 /* SecurityFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SecurityFoundation.framework; path = System/Library/Frameworks/SecurityFoundation.framework; sourceTree = SDKROOT; };
+		1131AF921A6D204C0052E821 /* ProtocolCodes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ProtocolCodes.h; sourceTree = "<group>"; };
 		11A7EEFA1A5134270093CB43 /* EventHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EventHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		11A7EEFE1A5134270093CB43 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		11A7EEFF1A5134270093CB43 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
@@ -42,6 +45,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1131AF811A6CDFB90052E821 /* SecurityFoundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,11 +80,13 @@
 		11A7EEFC1A5134270093CB43 /* EventHub */ = {
 			isa = PBXGroup;
 			children = (
+				1131AF801A6CDFB90052E821 /* SecurityFoundation.framework */,
 				11A7EEFF1A5134270093CB43 /* AppDelegate.h */,
 				11A7EF001A5134270093CB43 /* AppDelegate.m */,
 				11A7EF041A5134270093CB43 /* Images.xcassets */,
 				11A7EF061A5134270093CB43 /* MainMenu.xib */,
 				11A7EEFD1A5134270093CB43 /* Supporting Files */,
+				1131AF921A6D204C0052E821 /* ProtocolCodes.h */,
 			);
 			path = EventHub;
 			sourceTree = "<group>";
@@ -398,6 +404,7 @@
 				11A7EF191A5134270093CB43 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 		11A7EF1A1A5134270093CB43 /* Build configuration list for PBXNativeTarget "EventHubTests" */ = {
 			isa = XCConfigurationList;
@@ -406,6 +413,7 @@
 				11A7EF1C1A5134270093CB43 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};

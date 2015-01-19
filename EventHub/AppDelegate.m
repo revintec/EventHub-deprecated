@@ -9,6 +9,9 @@
 #import "AppDelegate.h"
 #import <IOKit/hid/IOHIDUsageTables.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <SecurityFoundation/SFAuthorization.h>
+
+#import "ProtocolCodes.h"
 
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
@@ -22,29 +25,56 @@
 #define DOPT_AIRPORTEXTRA_ALT      0x00000001
 #define DOPT_POWER_LOCKSCREEN      0x00000002
 
+AuthorizationRef authorization;
+pid_t daemonpid;FILE*daemonfile;
 ProcessSerialNumber myPsn={0,kCurrentProcess};
 AXUIElementRef axSystem;
 unsigned int gopts,dopts;
 CGEventRef cgevFPCD,cgevFPCU; // used to trigger Ctrl-DN-UP-DN-UP sequence when mouse clicks
 
-#pragma mark PRIVILAGED CODE START
-// these function may involves IPC to daemon process
-// they are currently not working due to security reasons
-__deprecated __unused static inline int suspendLoginProcess(){
-    return kill(pidOfLoginProcess,SIGSTOP);
+static inline OSStatus _AuthorizationExecuteWithPrivileges(
+       AuthorizationRef authorization,
+       const char*pathToTool,
+       AuthorizationFlags options,
+       char*const*arguments,
+       FILE**communicationsPipe){
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return AuthorizationExecuteWithPrivileges(authorization,pathToTool,options,arguments,communicationsPipe);
+#pragma clang diagnostic pop
 }
-__deprecated __unused static inline int resumeLoginProcess(){
-    return kill(pidOfLoginProcess,SIGCONT);
+uint32_t daemonTransactionSerial=1;
+static inline void daemonDestroy(){
+    fclose(daemonfile);
+    daemonfile=nil;
+    daemonpid=0;
 }
-#pragma mark PRIVILAGED CODE END
-
+/*! return -1 means IOError, and all further transaction will fail */
+static inline int daemonTransact(uint32_t opcode){
+    if(!daemonfile)return -1;
+    uint32_t commbuffer[2];
+    uint32_t transaction=daemonTransactionSerial;
+    commbuffer[0]=transaction;
+    commbuffer[1]=opcode;
+    do{
+        if(1!=fwrite(&commbuffer,sizeof(commbuffer),1,daemonfile))break;
+        if(1!=fread(&commbuffer,sizeof(commbuffer),1,daemonfile))break;
+        if(transaction!=daemonTransactionSerial)break; // reentrant failure
+        if(commbuffer[0]!=transaction)break; // comm failure
+        ++daemonTransactionSerial; // should use atomic inc
+        if(commbuffer[1]==-1)break; // daemon failure
+        return commbuffer[1];
+    }while(false);
+    daemonDestroy();
+    return -1;
+}
 static inline CGEventFlags ugcFlags(CGEventRef event){
     CGEventFlags f=CGEventGetFlags(event);
     f&=NSDeviceIndependentModifierFlagsMask;
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
-CGEventTimestamp powerDown;pid_t pidOfLoginProcess;
+CGEventTimestamp powerDown;
 #define cc(errormsg,axerror) {if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}}
 #define xx(errormsg,axerror) {if(axerror){NSLog(@"%s: %x at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}}
 static inline int sleepDisplayNow(){
@@ -60,57 +90,63 @@ static inline int sleepDisplayNow(){
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
     return error;
 }
+static inline int sleepSystemNow(){
+    return -1;
+}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
     // defaults write com.apple.loginwindow PowerButtonSleepsSystem -bool false
-    if(opts&DOPT_POWER_LOCKSCREEN&&pidOfLoginProcess)do{
+    if(opts&DOPT_POWER_LOCKSCREEN)do{
         if(type==NSSystemDefined){
             NSEvent*ex=[NSEvent eventWithCGEvent:event];
             NSEventSubtype sub=ex.subtype;
             if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
-//                NSUInteger data1=ex.data1;
-//                CGKeyCode keycode=data1>>16;
-//                // power button should have its ex.data2 0
-//                if(keycode==NX_POWER_KEY&&!ex.data2){
-//                    CGKeyCode flags=data1&0xFF00;
-//                    // CGKeyCode isRepeat=data1&0xFF; // should be 0x01 or 0x00, check it against other values
-//#define SPECIAL_KEY_DOWN 0x0a00
-//#define SPECIAL_KEY_UP   0x0b00
-//                    switch(flags){
-//                        case SPECIAL_KEY_DOWN:
-//                            cc("check last power down time",!!powerDown);
-//                            powerDown=CGEventGetTimestamp(event)/1000000;
-//                            break;
-//                        case SPECIAL_KEY_UP:
-//                            cc("kill -CONT loginwindow",resumeLoginProcess());
-//                            // disassemble from /System/Library/CoreServices/loginwindow.app
-//#define _powerButtonDebounceTime ((int)(0.35*1000))
-//#define _powerButtonShutdownUITime ((int)(1.5*1000))
-//                            cc("check last power down time",!powerDown);
-//                            powerDown=CGEventGetTimestamp(event)/1000000-powerDown;
-//                            NSLog(@"%d ms",(int)powerDown);
-//                            if(_powerButtonDebounceTime<powerDown&&powerDown<_powerButtonShutdownUITime){
-////                                typedef uint64_t CGSSessionID;
-////                                CGSSessionID session;
-////                                CG_EXTERN CGError CGSCreateLoginSession(CGSSessionID*outSession);
-////                                cc("CGSCLS",CGSCreateLoginSession(&session));
-////                                NSLog(@"Session: %llu",session);
-//                                sleepDisplayNow();
-//                            }powerDown=0;
-//                            break;
-//                        default:
-//                            xx("unknown flags",flags);
-//                            break;
-//                    }
-//                }
+                NSUInteger data1=ex.data1;
+                CGKeyCode keycode=data1>>16;
+                // power button should have its ex.data2 0
+                if(keycode==NX_POWER_KEY&&!ex.data2){
+                    NSLog(@"got power event");
+                    CGKeyCode flags=data1&0xFF00;
+                    // CGKeyCode isRepeat=data1&0xFF; // should be 0x01 or 0x00, check it against other values
+#define SPECIAL_KEY_DOWN 0x0a00
+#define SPECIAL_KEY_UP   0x0b00
+                    switch(flags){
+                        case SPECIAL_KEY_DOWN:
+                            cc("check last power down time",!!powerDown);
+                            powerDown=CGEventGetTimestamp(event)/1000000;
+                            break;
+                        case SPECIAL_KEY_UP:
+                            NSLog(@"resume loginwindow");
+                            cc("resume loginwindow",daemonTransact(PROTO_RESUME_LOGINWINDOW));
+                            // disassemble from /System/Library/CoreServices/loginwindow.app
+#define _powerButtonDebounceTime ((int)(0.35*1000))
+#define _powerButtonShutdownUITime ((int)(1.5*1000))
+                            cc("check last power down time",!powerDown);
+                            powerDown=CGEventGetTimestamp(event)/1000000-powerDown;
+                            NSLog(@"%d ms",(int)powerDown);
+                            if(powerDown>_powerButtonDebounceTime){
+                                if(powerDown<_powerButtonShutdownUITime){
+                                    cc("sleepDisplayNow",sleepDisplayNow());
+                                }else cc("sleepSystemNow",sleepSystemNow());
+                            }powerDown=0;
+                            break;
+                        default:
+                            xx("unknown flags",flags);
+                            break;
+                    }
+                }
             }else if(sub==NX_SUBTYPE_POWER_KEY){
                 // power button should have its ex.dataX 0
                 if(!ex.data1&&!ex.data2){
-                    // cc("kill -STOP loginwindow",suspendLoginProcess());
                     CGEventFlags flags=ugcFlags(event);
-                    if(flags==kCGEventFlagMaskCommand)
-                        sleepDisplayNow();
+                    if(flags==kCGEventFlagMaskCommand){
+                        cc("sleepSystemNow",sleepSystemNow());
+                    }else if(!flags){
+                        NSLog(@"suspend loginwindow");
+                        // seems too late
+                        cc("suspend loginwindow",daemonTransact(PROTO_SUSPEND_LOGINWINDOW));
+                    }
                 }
             }
         }
@@ -165,7 +201,10 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     [alert runModal];
     [NSApp terminate:self];
 }
--(IBAction)quitApp:(id)sender{[NSApp terminate:sender];}
+-(IBAction)quitApp:(id)sender{
+    daemonTransact(PROTO_SHUTDOWN_DAEMON);
+    [NSApp terminate:sender];
+}
 #pragma mark HID
 static inline CFDictionaryRef createMatchingDict(bool isDevice,uint32_t inUsagePage,uint32_t inUsage){
     if(inUsagePage){
@@ -216,24 +255,45 @@ static inline bool setCapslockLED(bool on){
     return kIOReturnSuccess==IOHIDDeviceSetValue(devKeyboard,elemKeyboardLedCapslock,on?oofON:oofOFF);
 }
 #pragma mark end HID
+static inline bool startDaemon(){
+    do{
+        NSBundle*bundle=[NSBundle mainBundle];
+        NSString*execpath=[bundle executablePath];
+        char*argv[]={"-daemon",nil};
+        OSStatus error=_AuthorizationExecuteWithPrivileges(authorization,[execpath UTF8String],0,argv,&daemonfile);
+        if(errAuthorizationSuccess!=error)return false;
+        // hand-shake
+        pid_t mypid=getpid();
+        if(1!=fwrite(&mypid,sizeof(mypid),1,daemonfile)||1!=fread(&daemonpid,sizeof(daemonpid),1,daemonfile))break;
+        NSLog(@"daemon(pid %d) attached to %d",daemonpid,mypid);
+        pid_t loginwindow=daemonTransact(PROTO_VALIDATE_LOGINWINDOW);
+        if(loginwindow<=0)break;
+        NSLog(@"loginwindow pid according to daemon: %d",loginwindow);
+        return true;
+    }while(false);
+    if(daemonfile)daemonDestroy();
+    return false;
+}
 -(void)applicationDidFinishLaunching:(NSNotification*)aNotification{
-    // if(geteuid()) ...not running as root, suspend/resume LoginProcess will fail...
-    // to run ourself as root, authenticate first, then run the following:
-    // sudo -b /path/to/our/app/EventHub.app/Contents/MacOS/EventHub
-    // -b prevent parent process(i.e. us) to wait the new EventHub.app(root)
+    if(errAuthorizationSuccess!=AuthorizationCreate(nil,kAuthorizationEmptyEnvironment,
+            kAuthorizationFlagExtendRights|kAuthorizationFlagInteractionAllowed,&authorization)){
+        [self.window close];
+        self.window=nil;
+        [self fatalWithText:@"Authorization failure"];
+        return;
+    }
+    if(!startDaemon()){
+        [self.window close];
+        self.window=nil;
+        [self fatalWithText:@"Unable to start daemon or comm error"];
+        return;
+    }
     if(!AXIsProcessTrusted()){
         [self.window close];
         self.window=nil;
         [self fatalWithText:@"Can't acquire Accessibility Permissions"];
         return;
     }
-    NSArray*apps=[NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.loginwindow"];
-    if([apps count]!=1){
-        [self.window close];
-        self.window=nil;
-        [self fatalWithText:@"Can't lock on login process"];
-        return;
-    }pidOfLoginProcess=[[apps objectAtIndex:0]processIdentifier];
     cgevFPCD=CGEventCreateKeyboardEvent(nil,kVK_Control,true);
     cgevFPCU=CGEventCreateKeyboardEvent(nil,kVK_Control,false);
     if(!cgevFPCD||!cgevFPCU){
