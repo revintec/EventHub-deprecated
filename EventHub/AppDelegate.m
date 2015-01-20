@@ -146,35 +146,37 @@ static inline CFDictionaryRef createMatchingDict(bool isDevice,uint32_t inUsageP
 IOHIDDeviceRef devKeyboard;IOHIDElementRef elemKeyboardLedCapslock;
 IOHIDValueRef oofON,oofOFF;
 static inline void initializeHID(){
-    {
-        IOHIDManagerRef mgr=IOHIDManagerCreate(kCFAllocatorDefault,kIOHIDOptionsTypeNone);
-        if(!mgr)return;
-        CFDictionaryRef criteria=createMatchingDict(true,kHIDPage_GenericDesktop,kHIDUsage_GD_Keyboard);
-        IOHIDManagerSetDeviceMatching(mgr,criteria);
-        CFRelease(criteria);
-        if(kIOReturnSuccess!=IOHIDManagerOpen(mgr,kIOHIDOptionsTypeNone)){IOHIDManagerClose(mgr,kIOHIDOptionsTypeNone);return;}
-        CFSetRef devices=IOHIDManagerCopyDevices(mgr);
-        IOHIDManagerClose(mgr,kIOHIDOptionsTypeNone);
-        if(!devices)return;
-        CFIndex count=CFSetGetCount(devices);
-        NSLog(@"%ld devices found",count);
-        if(count==1)CFSetGetValues(devices,(void*)&devKeyboard);
-        CFRelease(devices);
-    }if(!devKeyboard)return;
+    IOHIDManagerRef mgr=IOHIDManagerCreate(kCFAllocatorDefault,kIOHIDOptionsTypeNone);
+    if(!mgr)return;
+    CFDictionaryRef criteria=createMatchingDict(true,kHIDPage_GenericDesktop,kHIDUsage_GD_Keyboard);
+    IOHIDManagerSetDeviceMatching(mgr,criteria);
+    CFRelease(criteria);
+    if(kIOReturnSuccess!=IOHIDManagerOpen(mgr,kIOHIDOptionsTypeNone)){IOHIDManagerClose(mgr,kIOHIDOptionsTypeNone);return;}
+    CFSetRef devices=IOHIDManagerCopyDevices(mgr);
+    IOHIDManagerClose(mgr,kIOHIDOptionsTypeNone);
+    if(!devices)return;
+    CFIndex count=CFSetGetCount(devices);
+    NSLog(@"%ld devices found",count);
+    if(count==1)CFSetGetValues(devices,(void*)&devKeyboard);
+    CFRelease(devices);
+    if(!devKeyboard)return;
     if(kIOReturnSuccess!=IOHIDDeviceOpen(devKeyboard,kIOHIDOptionsTypeNone)){
         devKeyboard=nil;
         return;
     }
-    {
-        CFDictionaryRef criteria=createMatchingDict(false,kHIDPage_LEDs,kHIDUsage_LED_CapsLock);
-        CFArrayRef elems=IOHIDDeviceCopyMatchingElements(devKeyboard,criteria,kIOHIDOptionsTypeNone);
-        CFIndex count=CFArrayGetCount(elems);
-        NSLog(@"with %ld elements",count);
-        if(count==1)elemKeyboardLedCapslock=(void*)CFArrayGetValueAtIndex(elems,0);
-        CFRelease(elems);
-    }if(!elemKeyboardLedCapslock)return;
-    oofON= IOHIDValueCreateWithIntegerValue(kCFAllocatorDefault,elemKeyboardLedCapslock,0,true);
-    oofOFF=IOHIDValueCreateWithIntegerValue(kCFAllocatorDefault,elemKeyboardLedCapslock,0,false);
+    criteria=createMatchingDict(false,kHIDPage_LEDs,kHIDUsage_LED_CapsLock);
+    CFArrayRef elems=IOHIDDeviceCopyMatchingElements(devKeyboard,criteria,kIOHIDOptionsTypeNone);
+    count=CFArrayGetCount(elems);
+    NSLog(@"with %ld elements",count);
+    if(count==1)elemKeyboardLedCapslock=(void*)CFArrayGetValueAtIndex(elems,0);
+    CFRelease(elems);
+    if(elemKeyboardLedCapslock){
+        oofON=IOHIDValueCreateWithIntegerValue(kCFAllocatorDefault,elemKeyboardLedCapslock,0,true);
+        oofOFF=IOHIDValueCreateWithIntegerValue(kCFAllocatorDefault,elemKeyboardLedCapslock,0,false);
+    }else{
+        IOHIDDeviceClose(devKeyboard,kIOHIDOptionsTypeNone);
+        devKeyboard=nil;
+    }
 }
 static inline bool setCapslockLED(bool on){
     return kIOReturnSuccess==IOHIDDeviceSetValue(devKeyboard,elemKeyboardLedCapslock,on?oofON:oofOFF);
