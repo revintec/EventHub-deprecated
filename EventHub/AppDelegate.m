@@ -54,30 +54,26 @@ static inline int sleepDisplayNow(){
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
     return error;
 }
--(void)delayedCGEventOperations:(CGEventRef)event{
-    CGEventPostToPSN(&psnOfLoginProcess,event);
-    CFRelease(event);
-}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
     if(opts&DOPT_POWER_LOCKSCREEN)do{
         if(type==NSSystemDefined){
-#define FUCK_APPLE_CGEVENT_GET_SUBTYPE(event) (uint16_t*)((void*)event+0xa2)
-#define FUCK_APPLE_CGEVENT_GET_DATA1(event)   (uint32_t*)((void*)event+0xa4)
-#define FUCK_APPLE_CGEVENT_GET_DATA2(event)   (uint32_t*)((void*)event+0xa8)
+#define FUCK_APPLE_CGEVENT_GET_SUBTYPE(event) (*(uint16_t*)((void*)event+0xa2))
+#define FUCK_APPLE_CGEVENT_GET_DATA1(event)   (*(uint32_t*)((void*)event+0xa4))
+#define FUCK_APPLE_CGEVENT_GET_DATA2(event)   (*(uint32_t*)((void*)event+0xa8))
             if(!integrityCheck){
                 NSEvent*ex=[NSEvent eventWithCGEvent:event];
-                if([ex subtype]!=*FUCK_APPLE_CGEVENT_GET_SUBTYPE(event)||
-                   [ex data1]!=*FUCK_APPLE_CGEVENT_GET_DATA1(event)||
-                   [ex data2]!=*FUCK_APPLE_CGEVENT_GET_DATA2(event)){
+                if([ex subtype]!=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event)||
+                   [ex data1]!=FUCK_APPLE_CGEVENT_GET_DATA1(event)||
+                   [ex data2]!=FUCK_APPLE_CGEVENT_GET_DATA2(event)){
                     integrityCheck=-1;
                 }else integrityCheck=1;
             }
             cc("integrity check",integrityCheck<0);
-            NSEventSubtype sub=*FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
+            NSEventSubtype sub=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
             if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
-                NSUInteger data1=*FUCK_APPLE_CGEVENT_GET_DATA1(event);
+                NSUInteger data1=FUCK_APPLE_CGEVENT_GET_DATA1(event);
                 CGKeyCode keycode=data1>>16;
                 // power button should have its data2 equals 0
                 if(keycode==NX_POWER_KEY&&!FUCK_APPLE_CGEVENT_GET_DATA2(event)){
@@ -91,10 +87,8 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                     switch(flags){
                         case SPECIAL_KEY_DOWN:
                             cc("check last power down time for kd",!!powerDown);
-                            CGEventRef newEvent=CGEventCreateCopy(event);
-                            *FUCK_APPLE_CGEVENT_GET_DATA1(newEvent)^=SPECIAL_KEY_DOWN^SPECIAL_KEY_UP;
-                            // still not working! Fuck Apple! now you leave me with no choice but to memory patch you!!!
-                            [self performSelector:@selector(delayedCGEventOperations:)withObject:(__bridge id)newEvent afterDelay:0.1];
+                            // TODO memory patch loginwindow here
+                            NSLog(@"TODO: memory patch loginwindow here at %s(line %d)",__PRETTY_FUNCTION__,__LINE__);
                             powerDown=CGEventGetTimestamp(event)/1000000;
                             break;
                         case SPECIAL_KEY_UP:
@@ -114,7 +108,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                 }
             }else if(sub==NX_SUBTYPE_POWER_KEY){
                 // power button should have its data1 and data2 both equal 0
-                if(!*FUCK_APPLE_CGEVENT_GET_DATA1(event)&&!*FUCK_APPLE_CGEVENT_GET_DATA2(event)){
+                if(!FUCK_APPLE_CGEVENT_GET_DATA1(event)&&!FUCK_APPLE_CGEVENT_GET_DATA2(event)){
                     CGEventFlags flags=ugcFlags(event);
                     if(flags==kCGEventFlagMaskCommand){
                         sleepDisplayNow();
