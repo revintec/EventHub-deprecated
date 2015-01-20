@@ -9,6 +9,7 @@
 #import "AppDelegate.h"
 #import <IOKit/hid/IOHIDUsageTables.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <objc/runtime.h>
 
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
