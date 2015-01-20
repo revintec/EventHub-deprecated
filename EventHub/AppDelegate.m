@@ -55,6 +55,10 @@ static inline int sleepDisplayNow(){
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
     return error;
 }
+-(void)delayedCGEventOperations:(CGEventRef)event{
+    CGEventPostToPSN(&psnOfLoginProcess,event);
+    CFRelease(event);
+}
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
@@ -72,7 +76,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                     integrityCheck=-1;
                 }else integrityCheck=1;
             }
-            cc("integrity check",integrityCheck);
+            cc("integrity check",integrityCheck<0);
             NSEventSubtype sub=*FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
             if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
                 NSUInteger data1=*FUCK_APPLE_CGEVENT_GET_DATA1(event);
@@ -89,7 +93,10 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                     switch(flags){
                         case SPECIAL_KEY_DOWN:
                             cc("check last power down time for kd",!!powerDown);
-                            *FUCK_APPLE_CGEVENT_GET_DATA1(event)^=SPECIAL_KEY_DOWN^SPECIAL_KEY_UP;
+                            CGEventRef newEvent=CGEventCreateCopy(event);
+                            *FUCK_APPLE_CGEVENT_GET_DATA1(newEvent)^=SPECIAL_KEY_DOWN^SPECIAL_KEY_UP;
+                            // still not working! Fuck Apple! now you leave me with no choice but to memory patch you!!!
+                            [self performSelector:@selector(delayedCGEventOperations:)withObject:(__bridge id)newEvent afterDelay:0.1];
                             powerDown=CGEventGetTimestamp(event)/1000000;
                             break;
                         case SPECIAL_KEY_UP:
