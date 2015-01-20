@@ -9,7 +9,6 @@
 #import "AppDelegate.h"
 #import <IOKit/hid/IOHIDUsageTables.h>
 #import <AudioToolbox/AudioToolbox.h>
-#import <objc/runtime.h>
 
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
@@ -62,7 +61,6 @@ static inline int sleepDisplayNow(){
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
-    // defaults write com.apple.loginwindow PowerButtonSleepsSystem -bool false
     if(opts&DOPT_POWER_LOCKSCREEN)do{
         if(type==NSSystemDefined){
 #define FUCK_APPLE_CGEVENT_GET_SUBTYPE(event) (uint16_t*)((void*)event+0xa2)
@@ -102,7 +100,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                         case SPECIAL_KEY_UP:
                             cc("check last power down time for ku",!powerDown);
                             powerDown=CGEventGetTimestamp(event)/1000000-powerDown;
-                            NSLog(@"%d ms",(int)powerDown);
+                            NSLog(@"power button down for %d ms",(int)powerDown);
                             if(powerDown>_powerButtonDebounceTime){
                                 if(powerDown<_powerButtonShutdownUITime){
                                     NSLog(@"should sleep display");
@@ -115,7 +113,7 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                     }
                 }
             }else if(sub==NX_SUBTYPE_POWER_KEY){
-                // power button should have its ex.dataX 0
+                // power button should have its data1 and data2 both equal 0
                 if(!*FUCK_APPLE_CGEVENT_GET_DATA1(event)&&!*FUCK_APPLE_CGEVENT_GET_DATA2(event)){
                     CGEventFlags flags=ugcFlags(event);
                     if(flags==kCGEventFlagMaskCommand){
