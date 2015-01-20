@@ -9,6 +9,7 @@
 #import "AppDelegate.h"
 #import <IOKit/hid/IOHIDUsageTables.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <objc/runtime.h>
 
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
@@ -26,13 +27,21 @@ ProcessSerialNumber myPsn={0,kCurrentProcess};
 AXUIElementRef axSystem;
 unsigned int gopts,dopts;
 
+static inline OSStatus _GetProcessForPID(pid_t pid,ProcessSerialNumber*psn){
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return GetProcessForPID(pid,psn);
+#pragma clang diagnostic pop
+}
 static inline CGEventFlags ugcFlags(CGEventRef event){
     CGEventFlags f=CGEventGetFlags(event);
     f&=NSDeviceIndependentModifierFlagsMask;
     f&=~(kCGEventFlagMaskAlphaShift|kCGEventFlagMaskSecondaryFn);
     return f;
 }
+CGEventTimestamp powerDown;pid_t pidOfLoginProcess;ProcessSerialNumber psnOfLoginProcess;int integrityCheck;
 #define cc(errormsg,axerror) {if(axerror){NSLog(@"%s: %d at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}}
+#define xx(errormsg,axerror) {if(axerror){NSLog(@"%s: %x at %s(line %d)",errormsg,axerror,__PRETTY_FUNCTION__,__LINE__);AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);break;}}
 static inline int sleepDisplayNow(){
     kern_return_t error=KERN_FAILURE;
     do{
@@ -52,11 +61,55 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
     // defaults write com.apple.loginwindow PowerButtonSleepsSystem -bool false
     if(opts&DOPT_POWER_LOCKSCREEN)do{
         if(type==NSSystemDefined){
-            NSEvent*ex=[NSEvent eventWithCGEvent:event];
-            NSEventSubtype sub=ex.subtype;
-            if(sub==NX_SUBTYPE_POWER_KEY){
+#define FUCK_APPLE_CGEVENT_GET_SUBTYPE(event) (uint16_t*)((void*)event+0xa2)
+#define FUCK_APPLE_CGEVENT_GET_DATA1(event)   (uint32_t*)((void*)event+0xa4)
+#define FUCK_APPLE_CGEVENT_GET_DATA2(event)   (uint32_t*)((void*)event+0xa8)
+            if(!integrityCheck){
+                NSEvent*ex=[NSEvent eventWithCGEvent:event];
+                if([ex subtype]!=*FUCK_APPLE_CGEVENT_GET_SUBTYPE(event)||
+                   [ex data1]!=*FUCK_APPLE_CGEVENT_GET_DATA1(event)||
+                   [ex data2]!=*FUCK_APPLE_CGEVENT_GET_DATA2(event)){
+                    integrityCheck=-1;
+                }else integrityCheck=1;
+            }
+            cc("integrity check",integrityCheck);
+            NSEventSubtype sub=*FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
+            if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
+                NSUInteger data1=*FUCK_APPLE_CGEVENT_GET_DATA1(event);
+                CGKeyCode keycode=data1>>16;
+                // power button should have its data2 equals 0
+                if(keycode==NX_POWER_KEY&&!FUCK_APPLE_CGEVENT_GET_DATA2(event)){
+#define SPECIAL_KEY_DOWN 0x0a00
+#define SPECIAL_KEY_UP   0x0b00
+// disassembly from /System/Library/CoreServices/loginwindow.app
+#define _powerButtonDebounceTime 350
+#define _powerButtonShutdownUITime 1500
+                    CGKeyCode flags=data1&0xFF00;
+                    // CGKeyCode isRepeat=data1&0xFF; // should be 0x01 or 0x00, check it against other values
+                    switch(flags){
+                        case SPECIAL_KEY_DOWN:
+                            cc("check last power down time for kd",!!powerDown);
+                            *FUCK_APPLE_CGEVENT_GET_DATA1(event)^=SPECIAL_KEY_DOWN^SPECIAL_KEY_UP;
+                            powerDown=CGEventGetTimestamp(event)/1000000;
+                            break;
+                        case SPECIAL_KEY_UP:
+                            cc("check last power down time for ku",!powerDown);
+                            powerDown=CGEventGetTimestamp(event)/1000000-powerDown;
+                            NSLog(@"%d ms",(int)powerDown);
+                            if(powerDown>_powerButtonDebounceTime){
+                                if(powerDown<_powerButtonShutdownUITime){
+                                    NSLog(@"should sleep display");
+                                }else NSLog(@"should sleep system");
+                            }powerDown=0;
+                            break;
+                        default:
+                            xx("unknown flags",flags);
+                            break;
+                    }
+                }
+            }else if(sub==NX_SUBTYPE_POWER_KEY){
                 // power button should have its ex.dataX 0
-                if(!ex.data1&&!ex.data2){
+                if(!*FUCK_APPLE_CGEVENT_GET_DATA1(event)&&!*FUCK_APPLE_CGEVENT_GET_DATA2(event)){
                     CGEventFlags flags=ugcFlags(event);
                     if(flags==kCGEventFlagMaskCommand){
                         sleepDisplayNow();
@@ -170,22 +223,23 @@ static inline bool setCapslockLED(bool on){
 }
 #pragma mark end HID
 -(void)applicationDidFinishLaunching:(NSNotification*)aNotification{
-    if(!AXIsProcessTrusted()){
-        [self.window close];
-        self.window=nil;
-        [self fatalWithText:@"Can't acquire Accessibility Permissions"];
+#define ccc(msg,cond) {if(cond){errorMsg=@msg;break;}}
+    NSString*errorMsg;
+    do{
+        ccc("Can't acquire Accessibility Permissions",!AXIsProcessTrusted());
+        NSArray*apps=[NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.loginwindow"];
+        ccc("Can't lock on login process",[apps count]!=1);
+        ccc("Can't get login process psn",_GetProcessForPID(pidOfLoginProcess=[[apps objectAtIndex:0]processIdentifier],&psnOfLoginProcess));
+        initializeHID();
+        ccc("Error initializing HID",!devKeyboard||!elemKeyboardLedCapslock);
+        axSystem=AXUIElementCreateSystemWide();
+        NSNotificationCenter*ncc=[[NSWorkspace sharedWorkspace]notificationCenter];
+        [ncc addObserver:self selector:@selector(someotherAppGotActivated:)name:NSWorkspaceDidActivateApplicationNotification object:nil];
         return;
-    }
-    initializeHID();
-    if(!devKeyboard||!elemKeyboardLedCapslock){
-        [self.window close];
-        self.window=nil;
-        [self fatalWithText:@"Error initializing HID"];
-        return;
-    }
-    axSystem=AXUIElementCreateSystemWide();
-    NSNotificationCenter*ncc=[[NSWorkspace sharedWorkspace]notificationCenter];
-    [ncc addObserver:self selector:@selector(someotherAppGotActivated:)name:NSWorkspaceDidActivateApplicationNotification object:nil];
+    }while(false);
+    [self.window close];
+    self.window=nil;
+    [self fatalWithText:errorMsg];
 }
 -(void)undoAllChanges{
     dopts=0;
