@@ -202,7 +202,9 @@ static inline bool setCapslockLED(bool on){
 -(void)applicationDidResignActive:(NSNotification*)notification{
     if(!self.window)return;
     CGEventMask interest=0;
-    if(gopts&DOPT_AIRPORTEXTRA_ALT)interest|=NSLeftMouseDownMask;
+    // though we're only interested in NSLeftMouseDown, we have to register NSLeftMouseUp
+    // or else NSLeftMouseUp may reach the app before we've done processing NSLeftMouseDown
+    if(gopts&DOPT_AIRPORTEXTRA_ALT)interest|=NSLeftMouseDownMask|NSLeftMouseUpMask;
     if(gopts&DOPT_POWER_LOCKSCREEN)interest|=NSSystemDefinedMask;
     
     if(interest){
