@@ -17,10 +17,11 @@
 @end
 @implementation AppDelegate
 
-#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN
-#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN
+#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
+#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
 #define DOPT_AIRPORTEXTRA_ALT      0x00000001
 #define DOPT_POWER_LOCKSCREEN      0x00000002
+#define DOPT_FN_NUMPAD             0x00000004
 
 ProcessSerialNumber myPsn={0,kCurrentProcess};
 AXUIElementRef axSystem;
@@ -102,6 +103,17 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
             if(!(f&kCGEventFlagMaskAlternate)){
                 f|=kCGEventFlagMaskAlternate;
                 CGEventSetFlags(event,f);
+            }
+        }
+    }while(false);
+    
+    if(opts&DOPT_FN_NUMPAD)do{
+        if(type==NSEventMaskGesture||type==NSEventMaskBeginGesture||type==NSEventMaskEndGesture){
+            NSEvent*ev=[NSEvent eventWithCGEvent:event];
+            NSSet*touches=[ev touchesMatchingPhase:NSTouchPhaseEnded inView:nil];
+            for(NSTouch*t in touches){
+                NSPoint pt=[t normalizedPosition];
+                NSLog(@"%f,%f",pt.x,pt.y);
             }
         }
     }while(false);
@@ -217,6 +229,7 @@ static inline bool setCapslockLED(bool on){
     // or else NSLeftMouseUp may reach the app before we've done processing NSLeftMouseDown
     if(gopts&DOPT_AIRPORTEXTRA_ALT)interest|=NSLeftMouseDownMask|NSLeftMouseUpMask;
     if(gopts&DOPT_POWER_LOCKSCREEN)interest|=NSSystemDefinedMask;
+    if(gopts&DOPT_FN_NUMPAD)       interest|=NSEventMaskGesture|NSEventMaskBeginGesture|NSEventMaskEndGesture;
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
