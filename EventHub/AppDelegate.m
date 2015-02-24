@@ -17,11 +17,12 @@
 @end
 @implementation AppDelegate
 
-#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
-#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT|DOPT_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
+#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_CMD_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
+#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT|DOPT_CMD_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
 #define DOPT_AIRPORTEXTRA_ALT      0x00000001
-#define DOPT_POWER_LOCKSCREEN      0x00000002
+#define DOPT_CMD_POWER_LOCKSCREEN  0x00000002
 #define DOPT_FN_NUMPAD             0x00000004
+#define DOPT_FINDER_CMD_DELETE_FIX 0x00000008
 
 ProcessSerialNumber myPsn={0,kCurrentProcess};
 AXUIElementRef axSystem;
@@ -47,11 +48,25 @@ static inline int sleepDisplayNow(){
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
     return error;
 }
+static inline bool deleteToLineStart(AXUIElementRef elem){
+    do{
+        CFTypeRef axrange;cc("get SelectedTextRange",AXUIElementCopyAttributeValue(elem,kAXSelectedTextRangeAttribute,&axrange));
+        CFRange range;cc("conv AXRange",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
+        if(!range.length){
+            range.length=range.location;
+            range.location=0;
+            axrange=AXValueCreate(kAXValueCFRangeType,&range);
+            cc("set SelectedTextRange",AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))
+        }cc("delete selected text",AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,@""));
+        return true;
+    }while(false);
+    return false;
+}
 int integrityCheck;
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
-    if(opts&DOPT_POWER_LOCKSCREEN)do{
+    if(opts&DOPT_CMD_POWER_LOCKSCREEN)do{
         if(type==NSSystemDefined){
 #define FUCK_APPLE_CGEVENT_GET_SUBTYPE(event) (*(uint16_t*)((void*)event+0xa2))
 #define FUCK_APPLE_CGEVENT_GET_DATA1(event)   (*(uint32_t*)((void*)event+0xa4))
@@ -107,13 +122,35 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
         }
     }while(false);
     
-    if(opts&DOPT_FN_NUMPAD)do{
-        if(type==NSEventMaskGesture||type==NSEventMaskBeginGesture||type==NSEventMaskEndGesture){
-            NSEvent*ev=[NSEvent eventWithCGEvent:event];
-            NSSet*touches=[ev touchesMatchingPhase:NSTouchPhaseEnded inView:nil];
-            for(NSTouch*t in touches){
-                NSPoint pt=[t normalizedPosition];
-                NSLog(@"%f,%f",pt.x,pt.y);
+//    if(opts&DOPT_FN_NUMPAD)do{
+//        if(type==NSEventMaskGesture||type==NSEventMaskBeginGesture||type==NSEventMaskEndGesture){
+//            NSTouchEventSubtype
+//            NSEvent*ev=[NSEvent eventWithCGEvent:event];
+//            NSSet*touches=[ev touchesMatchingPhase:NSTouchPhaseEnded inView:nil];
+//            for(NSTouch*t in touches){
+//                NSPoint pt=[t normalizedPosition];
+//                NSLog(@"%f,%f",pt.x,pt.y);
+//            }
+//        }
+//    }while(false);
+    
+    if(opts&DOPT_FINDER_CMD_DELETE_FIX)do{
+        if(type==NSKeyDown||type==NSKeyUp){
+            int64_t keycode=CGEventGetIntegerValueField(event,kCGKeyboardEventKeycode);
+            if(keycode==kVK_Delete){
+                CGEventFlags f=ugcFlags(event);
+                if(f==kCGEventFlagMaskCommand){
+                    CFTypeRef elem;cc("AXGetFocusedUIE",AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(),kAXFocusedUIElementAttribute,&elem));
+                    CFTypeRef role;cc("AXGetFocusedUIRole",AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role));
+                    if(!CFEqual(kAXTextFieldRole,role))break;
+//                    CFTypeRef className;
+//                    if(!AXUIElementCopyAttributeValue(elem,(CFTypeRef)@"AXClassName",&className)){
+//                        NSLog(@"AXClassName: %@",className);
+//                        if(!CFEqual(@"TShrinkToFitTextView",className))break;
+//                    }
+                    if(type==NSKeyDown)deleteToLineStart(elem);
+                    return nil;
+                }
             }
         }
     }while(false);
@@ -227,9 +264,10 @@ static inline bool setCapslockLED(bool on){
     CGEventMask interest=0;
     // though we're only interested in NSLeftMouseDown, we have to register NSLeftMouseUp
     // or else NSLeftMouseUp may reach the app before we've done processing NSLeftMouseDown
-    if(gopts&DOPT_AIRPORTEXTRA_ALT)interest|=NSLeftMouseDownMask|NSLeftMouseUpMask;
-    if(gopts&DOPT_POWER_LOCKSCREEN)interest|=NSSystemDefinedMask;
-    if(gopts&DOPT_FN_NUMPAD)       interest|=NSEventMaskGesture|NSEventMaskBeginGesture|NSEventMaskEndGesture;
+    if(gopts&DOPT_AIRPORTEXTRA_ALT)    interest|=NSLeftMouseDownMask|NSLeftMouseUpMask;
+    if(gopts&DOPT_CMD_POWER_LOCKSCREEN)interest|=NSSystemDefinedMask;
+//    if(gopts&DOPT_FN_NUMPAD)           interest|=NSEventMaskGesture|NSEventMaskBeginGesture|NSEventMaskEndGesture;
+    if(gopts&DOPT_FINDER_CMD_DELETE_FIX)      interest|=NSKeyDownMask|NSKeyUpMask;
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
@@ -252,6 +290,7 @@ static inline bool setCapslockLED(bool on){
 #define setopt(app,opt) self.options[@app]=[NSNumber numberWithUnsignedInt:DOPT_DISABLE_ALL_FILTERING|opt]
     setopt("Remote Desktop Connection",DOPT_DISABLE_ALL_FILTERING);
     setopt("VMware Fusion",            DOPT_DISABLE_ALL_FILTERING);
+    setopt("Finder",                   DOPT_DEFAULT_MODE|DOPT_FINDER_CMD_DELETE_FIX);
     
     gopts=0xFFFFFFFF; // enable all filtering by default
 }
