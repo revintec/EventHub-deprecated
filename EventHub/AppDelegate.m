@@ -48,20 +48,20 @@ static inline int sleepDisplayNow(){
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
     return error;
 }
-static inline bool deleteToLineStart(AXUIElementRef elem){
-    do{
-        CFTypeRef axrange;cc("get SelectedTextRange",AXUIElementCopyAttributeValue(elem,kAXSelectedTextRangeAttribute,&axrange));
-        CFRange range;cc("conv AXRange",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
-        if(!range.length){
-            range.length=range.location;
-            range.location=0;
-            axrange=AXValueCreate(kAXValueCFRangeType,&range);
-            cc("set SelectedTextRange",AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))
-        }cc("delete selected text",AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,@""));
-        return true;
-    }while(false);
-    return false;
-}
+//static inline bool deleteToLineStart(AXUIElementRef elem){
+//    do{
+//        CFTypeRef axrange;cc("get SelectedTextRange",AXUIElementCopyAttributeValue(elem,kAXSelectedTextRangeAttribute,&axrange));
+//        CFRange range;cc("conv AXRange",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
+//        if(!range.length){
+//            range.length=range.location;
+//            range.location=0;
+//            axrange=AXValueCreate(kAXValueCFRangeType,&range);
+//            cc("set SelectedTextRange",AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))
+//        }cc("delete selected text",AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,@""));
+//        return true;
+//    }while(false);
+//    return false;
+//}
 int integrityCheck;
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
@@ -142,14 +142,16 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
                 if(f==kCGEventFlagMaskCommand){
                     CFTypeRef elem;cc("AXGetFocusedUIE",AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(),kAXFocusedUIElementAttribute,&elem));
                     CFTypeRef role;cc("AXGetFocusedUIRole",AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role));
-                    if(!CFEqual(kAXTextFieldRole,role))break;
+                    if(CFEqual(kAXTextFieldRole,role))break;
 //                    CFTypeRef className;
 //                    if(!AXUIElementCopyAttributeValue(elem,(CFTypeRef)@"AXClassName",&className)){
 //                        NSLog(@"AXClassName: %@",className);
 //                        if(!CFEqual(@"TShrinkToFitTextView",className))break;
 //                    }
-                    if(type==NSKeyDown)deleteToLineStart(elem);
-                    return nil;
+                    //if(type==NSKeyDown)deleteToLineStart(elem);
+                    CGEventSetIntegerValueField(event,kCGKeyboardEventKeycode,kVK_ForwardDelete);
+                    CGEventSetFlags(event,0);
+                    return event;
                 }
             }
         }
