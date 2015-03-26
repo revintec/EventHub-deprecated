@@ -17,12 +17,13 @@
 @end
 @implementation AppDelegate
 
-#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_CMD_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
-#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT|DOPT_CMD_POWER_LOCKSCREEN|DOPT_FN_NUMPAD
+#define DOPT_DEFAULT_MODE          DOPT_AIRPORTEXTRA_ALT|DOPT_CMD_POWER_LOCKSCREEN|DOPT_SAFARI_DOUBANFM|DOPT_CMD_DEL_OVERRIDE
+#define DOPT_DISABLE_ALL_FILTERING DOPT_AIRPORTEXTRA_ALT|DOPT_CMD_POWER_LOCKSCREEN|DOPT_SAFARI_DOUBANFM
 #define DOPT_AIRPORTEXTRA_ALT      0x00000001
 #define DOPT_CMD_POWER_LOCKSCREEN  0x00000002
-#define DOPT_FN_NUMPAD             0x00000004
-#define DOPT_FINDER_CMD_DELETE_FIX 0x00000008
+//#define DOPT_FN_NUMPAD             0x00000004
+#define DOPT_CMD_DEL_OVERRIDE      0x00000008
+#define DOPT_SAFARI_DOUBANFM       0x00000010
 
 ProcessSerialNumber myPsn={0,kCurrentProcess};
 AXUIElementRef axSystem;
@@ -48,38 +49,49 @@ static inline int sleepDisplayNow(){
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
     return error;
 }
-//static inline bool deleteToLineStart(AXUIElementRef elem){
-//    do{
-//        CFTypeRef axrange;cc("get SelectedTextRange",AXUIElementCopyAttributeValue(elem,kAXSelectedTextRangeAttribute,&axrange));
-//        CFRange range;cc("conv AXRange",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
-//        if(!range.length){
-//            range.length=range.location;
-//            range.location=0;
-//            axrange=AXValueCreate(kAXValueCFRangeType,&range);
-//            cc("set SelectedTextRange",AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))
-//        }cc("delete selected text",AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,@""));
-//        return true;
-//    }while(false);
-//    return false;
-//}
-int integrityCheck;
+static inline bool deleteToLineStart(AXUIElementRef elem){
+    do{
+        CFTypeRef axrange;cc("get SelectedTextRange",AXUIElementCopyAttributeValue(elem,kAXSelectedTextRangeAttribute,&axrange));
+        CFRange range;cc("conv AXRange",!AXValueGetValue(axrange,kAXValueCFRangeType,&range));
+        if(!range.length){
+            range.length=range.location;
+            range.location=0;
+            axrange=AXValueCreate(kAXValueCFRangeType,&range);
+            cc("set SelectedTextRange",AXUIElementSetAttributeValue(elem,kAXSelectedTextRangeAttribute,axrange))
+        }cc("delete selected text",AXUIElementSetAttributeValue(elem,kAXSelectedTextAttribute,@""));
+        return true;
+    }while(false);
+    return false;
+}
+int integrityCheck;pid_t lastFlashPid;
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
+    #define FUCK_APPLE_CGEVENT_GET_SUBTYPE(event) (*(uint16_t*)((void*)event+0xa2))
+    #define FUCK_APPLE_CGEVENT_GET_DATA1(event)   (*(uint32_t*)((void*)event+0xa4))
+    #define FUCK_APPLE_CGEVENT_GET_DATA2(event)   (*(uint32_t*)((void*)event+0xa8))
+    #define FUCK_APPLE_CGEVCOMPOUND_KEYDOWN   0x0a00
+    #define FUCK_APPLE_CGEVCOMPOUND_KEYUP     0x0b00
+    // we encounter NSSystemDefined more often, mouse click generates subType==7
+    // so optimize to check integrityCheck first
+    // if integrityCheck fails, stop all features and beep
+    if(integrityCheck<=0){
+        if(type==NSSystemDefined){
+            NSEvent*ex=[NSEvent eventWithCGEvent:event];
+            if([ex subtype]!=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event)||
+               [ex data1]!=FUCK_APPLE_CGEVENT_GET_DATA1(event)||
+               [ex data2]!=FUCK_APPLE_CGEVENT_GET_DATA2(event)){
+                integrityCheck=-1;
+            }else integrityCheck=1;
+        }if(integrityCheck<0){
+            NSLog(@"%s: failed at %s(line %d)","event structure integrity check",__PRETTY_FUNCTION__,__LINE__);
+            AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+            return event;
+        }
+    }
+    
     if(opts&DOPT_CMD_POWER_LOCKSCREEN)do{
         if(type==NSSystemDefined){
-#define FUCK_APPLE_CGEVENT_GET_SUBTYPE(event) (*(uint16_t*)((void*)event+0xa2))
-#define FUCK_APPLE_CGEVENT_GET_DATA1(event)   (*(uint32_t*)((void*)event+0xa4))
-#define FUCK_APPLE_CGEVENT_GET_DATA2(event)   (*(uint32_t*)((void*)event+0xa8))
-            if(!integrityCheck){
-                NSEvent*ex=[NSEvent eventWithCGEvent:event];
-                if([ex subtype]!=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event)||
-                   [ex data1]!=FUCK_APPLE_CGEVENT_GET_DATA1(event)||
-                   [ex data2]!=FUCK_APPLE_CGEVENT_GET_DATA2(event)){
-                    integrityCheck=-1;
-                }else integrityCheck=1;
-            }
-            cc("integrity check",integrityCheck<0);
             NSEventSubtype sub=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
             if(sub==NX_SUBTYPE_POWER_KEY){
                 // power button should have its data1 and data2 both equal 0
@@ -134,24 +146,52 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 //        }
 //    }while(false);
     
-    if(opts&DOPT_FINDER_CMD_DELETE_FIX)do{
+    // there is a better way however, use javascript window.DBR.act("pause");
+    if(opts&DOPT_SAFARI_DOUBANFM)do{
+        if(type==NSSystemDefined){
+            NSEventSubtype sub=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
+            if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
+                int data2=FUCK_APPLE_CGEVENT_GET_DATA2(event);
+                cc("NX_AUX_MEDIA data2!=-1",data2!=-1);
+                NSArray*plugins=[NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.WebKit.Plugin.64"];
+                if([plugins count]!=1)break;
+                int data1=FUCK_APPLE_CGEVENT_GET_DATA1(event);
+                int keyCode=data1>>16;
+                if(keyCode!=NX_KEYTYPE_PLAY)break;
+                if((data1&0xFFFF)==FUCK_APPLE_CGEVCOMPOUND_KEYDOWN){
+                    NSRunningApplication*flash=[plugins objectAtIndex:0];
+                    pid_t pid=[flash processIdentifier];
+                    int signal;
+                    if(lastFlashPid==pid){
+                        lastFlashPid=0;
+                        signal=SIGCONT;
+                    }else{
+                        lastFlashPid=pid;
+                        signal=SIGSTOP;
+                    }kill(pid,signal);
+                }return nil;
+            }
+        }
+    }while(false);
+    
+    // CMD-DEL still deletes file in other app's open/save dialog if we hook Finder.app only
+    if(opts&DOPT_CMD_DEL_OVERRIDE)do{
         if(type==NSKeyDown||type==NSKeyUp){
             int64_t keycode=CGEventGetIntegerValueField(event,kCGKeyboardEventKeycode);
             if(keycode==kVK_Delete){
                 CGEventFlags f=ugcFlags(event);
                 if(f==kCGEventFlagMaskCommand){
-                    CFTypeRef elem;cc("AXGetFocusedUIE",AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(),kAXFocusedUIElementAttribute,&elem));
-                    CFTypeRef role;cc("AXGetFocusedUIRole",AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role));
-                    if(CFEqual(kAXTextFieldRole,role))break;
+                    // don't use cc(AXUIE...), some app won't support Accessibility
+                    CFTypeRef elem;if(AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(),kAXFocusedUIElementAttribute,&elem))break;
+                    CFTypeRef role;if(AXUIElementCopyAttributeValue(elem,kAXRoleAttribute,&role))break;
+                    if(!CFEqual(kAXTextFieldRole,role))break;
 //                    CFTypeRef className;
 //                    if(!AXUIElementCopyAttributeValue(elem,(CFTypeRef)@"AXClassName",&className)){
 //                        NSLog(@"AXClassName: %@",className);
 //                        if(!CFEqual(@"TShrinkToFitTextView",className))break;
 //                    }
-                    //if(type==NSKeyDown)deleteToLineStart(elem);
-                    CGEventSetIntegerValueField(event,kCGKeyboardEventKeycode,kVK_ForwardDelete);
-                    CGEventSetFlags(event,0);
-                    return event;
+                    if(type==NSKeyDown)deleteToLineStart(elem);
+                    return nil;
                 }
             }
         }
@@ -269,7 +309,8 @@ static inline bool setCapslockLED(bool on){
     if(gopts&DOPT_AIRPORTEXTRA_ALT)    interest|=NSLeftMouseDownMask|NSLeftMouseUpMask;
     if(gopts&DOPT_CMD_POWER_LOCKSCREEN)interest|=NSSystemDefinedMask;
 //    if(gopts&DOPT_FN_NUMPAD)           interest|=NSEventMaskGesture|NSEventMaskBeginGesture|NSEventMaskEndGesture;
-    if(gopts&DOPT_FINDER_CMD_DELETE_FIX)      interest|=NSKeyDownMask|NSKeyUpMask;
+    if(gopts&DOPT_CMD_DEL_OVERRIDE)    interest|=NSKeyDownMask|NSKeyUpMask;
+    if(gopts&DOPT_SAFARI_DOUBANFM)     interest|=NSKeyDownMask|NSKeyUpMask;
     
     if(interest){
         self.eventTap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionDefault,interest,(CGEventTapCallBack)eventCallback,(__bridge void*)self);
@@ -292,7 +333,6 @@ static inline bool setCapslockLED(bool on){
 #define setopt(app,opt) self.options[@app]=[NSNumber numberWithUnsignedInt:DOPT_DISABLE_ALL_FILTERING|opt]
     setopt("Remote Desktop Connection",DOPT_DISABLE_ALL_FILTERING);
     setopt("VMware Fusion",            DOPT_DISABLE_ALL_FILTERING);
-    setopt("Finder",                   DOPT_DEFAULT_MODE|DOPT_FINDER_CMD_DELETE_FIX);
     
     gopts=0xFFFFFFFF; // enable all filtering by default
 }
