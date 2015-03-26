@@ -296,6 +296,7 @@ static inline bool setCapslockLED(bool on){
 -(void)undoAllChanges{
     dopts=0;
     if(self.eventTap){
+        CGEventTapEnable(self.eventTap,false);
         CFRelease(self.eventTap);
         self.eventTap=nil;
     }setCapslockLED(false);
