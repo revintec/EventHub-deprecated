@@ -9,6 +9,7 @@
 #import "AppDelegate.h"
 #import <IOKit/hid/IOHIDUsageTables.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import "Safari.h"
 
 @interface AppDelegate()
 @property(weak)IBOutlet NSWindow*window;
@@ -63,7 +64,16 @@ static inline bool deleteToLineStart(AXUIElementRef elem){
     }while(false);
     return false;
 }
-int integrityCheck;pid_t lastFlashPid;
+static inline SafariTab*findDoubanFmTab(SafariApplication*app){
+    for(SafariWindow*win in[app windows]){
+        for(SafariTab*tab in[win tabs]){
+            NSString*url=[tab URL];
+            if([url hasPrefix:@"http://douban.fm/"])
+                return tab;
+        }
+    }return nil;
+}
+int integrityCheck;
 CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event,AppDelegate*self){
     unsigned int opts=gopts&dopts;
     
@@ -146,30 +156,24 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 //        }
 //    }while(false);
     
-    // there is a better way however, use javascript window.DBR.act("pause");
     if(opts&DOPT_SAFARI_DOUBANFM)do{
         if(type==NSSystemDefined){
             NSEventSubtype sub=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
             if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
                 int data2=FUCK_APPLE_CGEVENT_GET_DATA2(event);
                 cc("NX_AUX_MEDIA data2!=-1",data2!=-1);
-                NSArray*plugins=[NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.WebKit.Plugin.64"];
-                if([plugins count]!=1)break;
                 int data1=FUCK_APPLE_CGEVENT_GET_DATA1(event);
                 int keyCode=data1>>16;
                 if(keyCode!=NX_KEYTYPE_PLAY)break;
-                if((data1&0xFFFF)==FUCK_APPLE_CGEVCOMPOUND_KEYDOWN){
-                    NSRunningApplication*flash=[plugins objectAtIndex:0];
-                    pid_t pid=[flash processIdentifier];
-                    int signal;
-                    if(lastFlashPid==pid){
-                        lastFlashPid=0;
-                        signal=SIGCONT;
-                    }else{
-                        lastFlashPid=pid;
-                        signal=SIGSTOP;
-                    }kill(pid,signal);
-                }return nil;
+                NSString*safariBundleId=@"com.apple.Safari";
+                NSArray*ras=[NSRunningApplication runningApplicationsWithBundleIdentifier:safariBundleId];
+                if(![ras count])break;
+                SafariApplication*app=[SBApplication applicationWithBundleIdentifier:safariBundleId];
+                SafariTab*tab=findDoubanFmTab(app);
+                if(!tab)break;
+                if((data1&0xFFFF)==FUCK_APPLE_CGEVCOMPOUND_KEYDOWN)
+                    [app doJavaScript:@"DBR.act('pause')"in:tab];
+                return nil;
             }
         }
     }while(false);
