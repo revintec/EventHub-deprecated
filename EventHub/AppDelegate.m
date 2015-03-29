@@ -157,23 +157,48 @@ CGEventRef eventCallback(CGEventTapProxy proxy,CGEventType type,CGEventRef event
 //    }while(false);
     
     if(opts&DOPT_SAFARI_DOUBANFM)do{
+        CGEventFlags f=ugcFlags(event);
+        if(f&&f!=kCGEventFlagMaskCommand)break;
         if(type==NSSystemDefined){
             NSEventSubtype sub=FUCK_APPLE_CGEVENT_GET_SUBTYPE(event);
             if(sub==NX_SUBTYPE_AUX_CONTROL_BUTTONS){
                 int data2=FUCK_APPLE_CGEVENT_GET_DATA2(event);
                 cc("NX_AUX_MEDIA data2!=-1",data2!=-1);
                 int data1=FUCK_APPLE_CGEVENT_GET_DATA1(event);
+                int kdd=data1&0xFFFF;
+                if(kdd!=FUCK_APPLE_CGEVCOMPOUND_KEYDOWN&&kdd!=FUCK_APPLE_CGEVCOMPOUND_KEYUP)break;
+                kdd=kdd==FUCK_APPLE_CGEVCOMPOUND_KEYDOWN;
                 int keyCode=data1>>16;
-                if(keyCode!=NX_KEYTYPE_PLAY)break;
+                if(keyCode!=NX_KEYTYPE_PLAY&&
+                   keyCode!=NX_KEYTYPE_REWIND&&keyCode!=NX_KEYTYPE_FAST&&
+                   keyCode!=NX_KEYTYPE_PREVIOUS&&keyCode!=NX_KEYTYPE_NEXT)
+                    break;
                 NSString*safariBundleId=@"com.apple.Safari";
                 NSArray*ras=[NSRunningApplication runningApplicationsWithBundleIdentifier:safariBundleId];
                 if(![ras count])break;
                 SafariApplication*app=[SBApplication applicationWithBundleIdentifier:safariBundleId];
                 SafariTab*tab=findDoubanFmTab(app);
                 if(!tab)break;
-                if((data1&0xFFFF)==FUCK_APPLE_CGEVCOMPOUND_KEYDOWN)
-                    [app doJavaScript:@"DBR.act('pause')"in:tab];
-                return nil;
+                if(kdd){
+                    NSString*command;
+                    switch(keyCode){ // keyCode
+                        case NX_KEYTYPE_PLAY:
+                            command=@"DBR.act('pause')";
+                            break;
+//                        case NX_KEYTYPE_PREVIOUS:
+                        case NX_KEYTYPE_REWIND:
+                            if(f)command=@"DBR.act('love')";
+                            else command=@"if(!DBR.selected_like())DBR.act('love')";
+                            break;
+//                        case NX_KEYTYPE_NEXT:
+                        case NX_KEYTYPE_FAST:
+                            if(f)command=@"DBR.act('???')";
+                            else command=@"DBR.act('skip')";
+                            break;
+                        default:command=nil;
+                    }if(!command)break;
+                    [app doJavaScript:command in:tab];
+                }return nil;
             }
         }
     }while(false);
